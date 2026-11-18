@@ -441,9 +441,9 @@ def main() -> int:
         POOL.add_account(email, wlt, credits=credits)
     if not POOL.keys():
         POOL.new_sk("default")
-        print("已生成用户 key:", POOL.keys()[0]["sk"])
-    print(f"\n  管理面板 → http://{a.host}:{a.port}/")
-    print(f"  base_url → http://{a.host}:{a.port}/v1\n")
+        print("已生成用户 key:", POOL.keys()[0]["sk"], flush=True)
+    print(f"\n  管理面板 → http://{a.host}:{a.port}/", flush=True)
+    print(f"  base_url → http://{a.host}:{a.port}/v1\n", flush=True)
     uvicorn.run(app, host=a.host, port=a.port, log_level="warning")
     return 0
 
