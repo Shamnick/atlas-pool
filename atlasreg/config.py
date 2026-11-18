@@ -72,6 +72,7 @@ class AtlasCfg:
     clerk_api_version: str = "2026-08-20"
     clerk_js_version: str = "6.43.0"
     # Marble 开户默认值
+    pool_url: str = "http://127.0.0.1:8790"   # 注册成功后自动入池的网关地址
     residency_region: str = "US_CANADA"   # 合法值: US_CANADA / LATIN_AMERICA_CARIBBEAN / EU / UK_CH_EEA / OTHER_EUROPE / MIDDLE_EAST_AFRICA / ASIA_PACIFIC
     default_project_name: str = "My First World"
     display_name_pool: str = "Atlas User"

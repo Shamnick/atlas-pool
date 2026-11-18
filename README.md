@@ -123,15 +123,63 @@ WLT-Api-Key:    sk-pool-xxxxxxxx
 
 ---
 
+## Performance
+
+网关自身（不含上游生成耗时），本机实测：
+
+| 路径 | 并发 | QPS | p50 | p95 |
+|---|---|---|---|---|
+| `GET /v1/models` | 50 | **2078** | 22ms | 26ms |
+| `GET /v1/models` | 100 | **1945** | 48ms | 54ms |
+| `GET /v1/health` | 20 | 1004 | 12ms | 15ms |
+| `GET /admin/state` | 30 | 1780 | 16ms | 20ms |
+
+真实上游并发（3 个 `atlasTextToImage` 同时跑）：
+
+```
+#1 200 30.5s   #2 200 31.6s   #3 200 29.9s
+3 并发总耗时 31.6s（串行应约 92s）→ 3× 加速
+```
+
+工程上的保障：
+
+- 全局 `httpx` 连接池（200 连接 / 60 keep-alive）+ 上游并发闸门（默认 64）
+- 429 / 5xx / 网络抖动自动指数退避重试（3 次）
+- 单 key 限流 60 req/min，账号按成功率轮转、连续失败自动熔断
+- SQLite WAL + 索引，**日志写入失败不影响业务响应**
+- `x-request-id` 贯穿上下游，`/v1/health` 可直接接负载均衡探活
+
+---
+
+## Batch onboarding
+
+把一批 hotmail 粘进「账号源」，选「实跑」，每个账号会自动走完：
+
+```
+登录邮箱 → Turnstile → Clerk 注册 → 邮箱码 → 短信码 → session
+        → 开户 → 签发 wl_live_… → POST 入池
+```
+
+失败不会中断队列，其余账号继续；面板上每个任务独立显示阶段与失败原因。
+
+---
+
 ## Console
 
 网关控制台只有三块：**凭证** → **试一下** → **调用记录**。
 选模型、写提示词、点运行，图片直接出在图里，3D 产物给下载卡片，JSON 默认折叠。
 
-<div align="center"><img src="assets/panel.png" width="820"/></div>
+<div align="center">
+  <img src="assets/models.png" width="820"/><br/>
+  <sub>模型页：6 个任务，含类别、参数、实测延迟</sub>
+</div>
 
-注册机控制台同样只有三层：**开始** → **进度** → **任务**，配置收在最后。
-「演示」模式不联网不花钱，用来确认流程；「实跑」走真实链路。
+<br/>
+
+注册机控制台同样三层：**任务** → **进度** → **账号源**。
+「演示」不联网不花钱；「实跑」按账号源逐个注册，**成功后自动签发 API Key 并入池**。
+
+<div align="center"><img src="assets/signup.png" width="760"/></div>
 
 ---
 
@@ -186,6 +234,7 @@ atlas-pool/
 │   ├── mail.py           IMAP / Email Worker / mail.tm
 │   ├── sms.py            接码平台
 │   ├── captcha.py        Turnstile 求解
+│   ├── onboard.py        单账号端到端（注册→签 Key→入池）
 │   ├── pipeline.py       流水线 + 并发
 │   └── store.py          SQLite 账号库
 ├── docs/

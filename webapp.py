@@ -51,7 +51,10 @@ STAGES = [
 ]
 STAGE_ORDER = [s[0] for s in STAGES]
 STAGE_LABEL = {s[0]: s[1] for s in STAGES}
-STAGE_LABEL["done"] = "完成"
+STAGE_LABEL.update({
+    "done": "完成", "login": "登录邮箱", "apikey": "签发 API Key", "pool": "入池",
+    "queued": "排队",
+})
 
 
 class Task:
@@ -60,6 +63,7 @@ class Task:
         self.idx = idx
         self.mode = mode
         self.email = ""
+        self.pw = ""
         self.phone = ""
         self.stage = "queued"
         self.progress = 0.0
@@ -225,6 +229,42 @@ async def run_live_task(t: Task, cfg) -> None:
         t.ended = time.time()
 
 
+async def run_onboard_task(t: Task, cfg, email: str, password: str, pool_url: str) -> None:
+    """真跑：登录邮箱 → 注册 → 验证 → 签 Key → 入池。"""
+    from atlasreg.onboard import onboard_one
+
+    t.status = "running"
+    t.email = email
+    loop = asyncio.get_running_loop()
+
+    def on_stage(st: str) -> None:
+        t.stage = st
+        try:
+            i = STAGE_ORDER.index(st)
+            t.progress = sum(x[2] for x in STAGES[:i])
+        except ValueError:
+            t.progress = max(t.progress, 10)
+
+    def on_log(msg: str) -> None:
+        APP.log(f"[{t.id}] {msg}")
+
+    try:
+        res = await loop.run_in_executor(
+            None, lambda: onboard_one(email, password, cfg, pool_url=pool_url,
+                                      on_stage=on_stage, on_log=on_log))
+        t.credits = float(res.get("credits") or 0)
+        t.status = "ok"
+        t.stage = "done"
+        t.progress = 100
+        APP.log(f"[{t.id}] ✔ {email} 完成，积分 {t.credits:.0f}，已入池", "ok")
+    except Exception as e:  # noqa: BLE001
+        t.status = "failed"
+        t.error = f"{type(e).__name__}: {str(e)[:160]}"
+        APP.log(f"[{t.id}] ✗ {email} 失败: {t.error}", "error")
+    finally:
+        t.ended = time.time()
+
+
 async def run_browser_task(t: Task, cfg) -> None:
     """浏览器 SDK 模式：起子进程跑 reg.py browser，流式解析日志。"""
     t.status = "running"
@@ -271,7 +311,21 @@ async def run_browser_task(t: Task, cfg) -> None:
         APP.log(f"[{t.id}] 浏览器模式失败，exit={code}", "error")
 
 
-async def runner(mode: str, count: int, concurrency: int, use_browser: bool) -> None:
+def parse_pool(text: str) -> list[tuple[str, str]]:
+    out = []
+    for line in (text or "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "----" in line:
+            e, p = line.split("----", 1)
+            if e.strip() and p.strip():
+                out.append((e.strip(), p.strip()))
+    return out
+
+
+async def runner(mode: str, count: int, concurrency: int, use_browser: bool,
+                 pool: str = "", pool_url: str = "http://127.0.0.1:8790") -> None:
     APP.running = True
     APP.mode = mode
     APP.started_at = time.time()
@@ -292,10 +346,21 @@ async def runner(mode: str, count: int, concurrency: int, use_browser: bool) -> 
                 return
             if mode == "demo":
                 await run_demo_task(t, concurrency)
+            elif accounts and t.email:
+                await run_onboard_task(t, cfg, t.email, t.pw, pool_url)
             elif use_browser:
                 await run_browser_task(t, cfg)
             else:
                 await run_live_task(t, cfg)
+
+    accounts = parse_pool(pool)
+    if mode == "live" and accounts:
+        # 批量开号：每个任务绑定一个 hotmail
+        n = min(count, len(accounts))
+        APP.tasks = APP.tasks[:n]
+        for i, t in enumerate(APP.tasks):
+            t.email, t.pw = accounts[i] if i < len(accounts) else ("", "")
+        APP.log(f"== 批量开号：{n} 个账号，并发 {concurrency} ==")
 
     APP.batch = [asyncio.create_task(one(t)) for t in APP.tasks if t.status == "queued"]
     await asyncio.gather(*APP.batch, return_exceptions=True)
@@ -364,6 +429,8 @@ async def api_start(req: Request) -> JSONResponse:
     count = int(body.get("count", 5))
     concurrency = int(body.get("concurrency", 2))
     use_browser = bool(body.get("browser", False))
+    pool = body.get("pool") or ""
+    pool_url = body.get("pool_url") or (cfgmod.load(CFG_PATH).atlas.pool_url if hasattr(cfgmod.load(CFG_PATH).atlas, "pool_url") else "http://127.0.0.1:8790")
     if mode == "live":
         cfg = _load_cfg()
         miss: list[str] = []
@@ -381,7 +448,7 @@ async def api_start(req: Request) -> JSONResponse:
             return JSONResponse({"ok": False, "error": "缺配置：" + "，".join(miss)}, status_code=400)
     APP.tasks = [Task(i + 1, mode) for i in range(count)]
     APP.logs.clear()
-    asyncio.create_task(runner(mode, count, concurrency, use_browser))
+    asyncio.create_task(runner(mode, count, concurrency, use_browser, pool, pool_url))
     return JSONResponse({"ok": True, "count": count})
 
 
