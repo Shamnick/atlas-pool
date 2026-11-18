@@ -4,6 +4,8 @@ pool.db
 accounts.db
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 ms_accounts.json
 ms_accounts.txt
 ms_profile/
