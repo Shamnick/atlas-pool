@@ -401,6 +401,20 @@ async def admin_test(model: str, request: Request):
         return {"ok": False, "status": r.status_code, "raw": r.text[:400]}
 
 
+@app.get("/admin/image")
+async def admin_image(url: str):
+    """图片代理：GCS 签名直链在浏览器里常被拦，这里由服务端取回转给前端。"""
+    from fastapi.responses import Response
+    if not url.startswith("https://storage.googleapis.com/"):
+        return _err(400, "仅允许 storage.googleapis.com")
+    async with httpx.AsyncClient(proxy=_proxy(), timeout=120) as c:
+        r = await c.get(url)
+    if r.status_code != 200:
+        return _err(r.status_code, "拉取图片失败")
+    return Response(r.content, media_type=r.headers.get("content-type", "image/jpeg"),
+                    headers={"cache-control": "public, max-age=300"})
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index():
     return (ROOT / "web" / "gateway.html").read_text(encoding="utf-8")

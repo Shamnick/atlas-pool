@@ -116,7 +116,7 @@ details[open] summary:before{transform:rotate(90deg)}
     <div class="hint" id="modelHint"></div>
     <div class="result" id="result">
       <div class="imgs" id="imgs"></div>
-      <pre id="raw"></pre>
+      <details><summary style="padding:0 0 10px">查看 JSON 响应</summary><pre id="raw"></pre></details>
     </div>
   </div>
 
@@ -226,7 +226,7 @@ async function runTask(){
     const frames = (d.response && d.response.frames) || [];
     $('imgs').innerHTML = frames.map(f=>{
       const u = f.imageAsset && f.imageAsset.url;
-      return u ? `<img src="${u}" alt="result"/>` : '';
+      return u ? `<img src="/admin/image?url=${encodeURIComponent(u)}" alt="result" loading="lazy"/>` : '';
     }).join('');
     $('raw').textContent = JSON.stringify(d, null, 2).slice(0, 4000);
   }catch(e){

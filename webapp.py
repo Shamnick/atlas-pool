@@ -328,7 +328,9 @@ async def api_config() -> JSONResponse:
         "mail": {"provider": cfg.mail.provider, "domain": cfg.mail.domain,
                  "imap_host": cfg.mail.imap_host, "imap_user": cfg.mail.imap_user,
                  "imap_pass": cfg.mail.imap_pass, "http_url": cfg.mail.http_url,
-                 "http_token": cfg.mail.http_token},
+                 "http_token": cfg.mail.http_token,
+                 "ms_email": cfg.mail.ms_email, "owa_profile": cfg.mail.owa_profile,
+                 "ms_accounts_file": cfg.mail.ms_accounts_file},
         "sms": {"provider": cfg.sms.provider, "api_key": cfg.sms.api_key,
                 "country": cfg.sms.country, "service": cfg.sms.service},
         "run": {"concurrency": cfg.run.concurrency, "per_ip_delay": cfg.run.per_ip_delay,
@@ -371,6 +373,8 @@ async def api_start(req: Request) -> JSONResponse:
             miss.append("MAIL_DOMAIN + IMAP_*")
         if cfg.mail.provider == "http" and not (cfg.mail.domain and cfg.mail.http_url):
             miss.append("MAIL_DOMAIN + MAIL_HTTP_URL")
+        if cfg.mail.provider == "msowa" and not cfg.mail.ms_email:
+            miss.append("hotmail 地址（邮箱来源选 msowa 时必填）")
         if cfg.sms.provider != "manual" and not cfg.sms.api_key:
             miss.append("SMS_KEY（接码平台）")
         if miss:
