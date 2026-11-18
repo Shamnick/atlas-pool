@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Atlas 账号池</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f7f8fa; --card:#ffffff; --line:#e6e8ec; --line-2:#f0f1f4;
+  --txt:#111827; --dim:#6b7280; --mute:#9ca3af;
+  --primary:#2563eb; --primary-2:#1d4ed8; --ok:#059669; --err:#dc2626; --warn:#d97706;
+  --r:12px; --r-sm:8px;
+  --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+}
+body{background:var(--bg);color:var(--txt);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;padding:28px 20px 60px}
+.wrap{max-width:920px;margin:0 auto}
+header{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#2563eb);
+  display:grid;place-items:center;color:#fff;font-weight:700;font-size:15px;box-shadow:0 2px 6px rgba(37,99,235,.35)}
+h1{font-size:17px;font-weight:650;letter-spacing:-.2px}
+h1 span{font-weight:400;color:var(--mute);font-size:12.5px;margin-left:8px}
+.spacer{flex:1}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
+  background:var(--card);border:1px solid var(--line);font-size:12px;color:var(--dim);box-shadow:var(--shadow)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--ok)}
+.dot.off{background:var(--mute)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:14px}
+.card h2{font-size:12px;font-weight:600;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;margin-bottom:12px}
+.creds{display:grid;gap:12px}
+.field{display:grid;grid-template-columns:88px 1fr auto;align-items:center;gap:10px}
+.field label{font-size:12.5px;color:var(--dim)}
+.val{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;background:#fafbfc;
+  border:1px solid var(--line);border-radius:var(--r-sm);padding:8px 11px;overflow:auto;white-space:nowrap;color:#1f2937}
+button{font:inherit;font-size:13px;font-weight:500;border-radius:var(--r-sm);padding:8px 15px;
+  border:1px solid var(--line);background:#fff;color:var(--txt);cursor:pointer;transition:.15s;white-space:nowrap}
+button:hover{background:#f9fafb;border-color:#d1d5db}
+button.primary{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 1px 2px rgba(37,99,235,.25)}
+button.primary:hover{background:var(--primary-2);border-color:var(--primary-2)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.ghost{border-color:transparent;background:transparent;color:var(--dim);padding:6px 9px}
+button.ghost:hover{background:#f3f4f6;color:var(--txt)}
+.run{display:grid;grid-template-columns:210px 1fr auto;gap:10px;align-items:center}
+select,input,textarea{font:inherit;font-size:13.5px;padding:9px 11px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:#fff;color:var(--txt);outline:none;width:100%}
+select:focus,input:focus,textarea:focus{border-color:#93b4fb;box-shadow:0 0 0 3px rgba(37,99,235,.09)}
+.hint{font-size:12px;color:var(--mute);margin-top:8px}
+pre{background:#0f172a;color:#cbd5e1;border-radius:var(--r-sm);padding:12px 14px;font-size:12px;
+  overflow:auto;max-height:280px;font-family:ui-monospace,Menlo,monospace;line-height:1.55}
+.result{margin-top:14px;display:none}
+.result.show{display:block}
+.imgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:12px}
+.imgs img{width:100%;border-radius:var(--r-sm);border:1px solid var(--line);display:block}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-weight:500;color:var(--mute);font-size:11.5px;letter-spacing:.3px;
+  text-transform:uppercase;padding:0 0 9px;border-bottom:1px solid var(--line-2)}
+td{padding:9px 0;border-bottom:1px solid var(--line-2);vertical-align:middle}
+tr:last-child td{border-bottom:none}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500}
+.badge.ok{background:#ecfdf5;color:#047857}
+.badge.err{background:#fef2f2;color:#b91c1c}
+.badge.idle{background:#f3f4f6;color:#6b7280}
+.muted{color:var(--mute)}
+details{margin-top:6px}
+summary{cursor:pointer;font-size:12.5px;color:var(--dim);list-style:none;padding:8px 0;
+  display:flex;align-items:center;gap:6px;user-select:none}
+summary::-webkit-details-marker{display:none}
+summary:before{content:"›";display:inline-block;transition:.2s;font-size:15px;color:var(--mute)}
+details[open] summary:before{transform:rotate(90deg)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:#111827;color:#fff;padding:9px 16px;border-radius:9px;font-size:13px;transition:.22s;pointer-events:none;z-index:99}
+.toast.show{opacity:1;transform:translateX(-50%)}
+.stats{display:flex;gap:22px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:1px}
+.stat b{font-size:19px;font-weight:650;letter-spacing:-.3px}
+.stat small{font-size:11.5px;color:var(--mute)}
+@media(max-width:720px){.run{grid-template-columns:1fr}.field{grid-template-columns:1fr auto}.field label{grid-column:1/-1}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">A</div>
+    <h1>Atlas 账号池<span>World Labs · Marble</span></h1>
+    <div class="spacer"></div>
+    <div class="pill"><span class="dot" id="dot"></span><span id="poolText">读取中…</span></div>
+  </header>
+
+  <div class="card">
+    <h2>接入凭据</h2>
+    <div class="creds">
+      <div class="field">
+        <label>BASE URL</label>
+        <div class="val" id="baseUrl">—</div>
+        <button onclick="copy('baseUrl')">复制</button>
+      </div>
+      <div class="field">
+        <label>API KEY</label>
+        <div class="val" id="apiKey">—</div>
+        <button onclick="copy('apiKey')">复制</button>
+      </div>
+    </div>
+    <div class="hint">OpenAI SDK 直接可用：<code>OpenAI(base_url=…, api_key=…)</code>；鉴权头支持 <code>Authorization: Bearer</code> 或 <code>WLT-Api-Key</code>。</div>
+  </div>
+
+  <div class="card">
+    <h2>试一下</h2>
+    <div class="run">
+      <select id="model"></select>
+      <input id="prompt" value="a small greenhouse at dawn, warm light, wide view"/>
+      <button class="primary" id="runBtn" onclick="runTask()">运行</button>
+    </div>
+    <div class="hint" id="modelHint"></div>
+    <div class="result" id="result">
+      <div class="imgs" id="imgs"></div>
+      <pre id="raw"></pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>最近调用</h2>
+    <table>
+      <thead><tr><th style="width:76px">时间</th><th>模型</th><th style="width:70px">状态</th><th style="width:70px">耗时</th><th>账号</th></tr></thead>
+      <tbody id="calls"></tbody>
+    </table>
+    <details>
+      <summary>账号池与密钥（高级）</summary>
+      <div style="padding-top:6px">
+        <table>
+          <thead><tr><th>邮箱</th><th style="width:88px">积分</th><th style="width:96px">成功 / 失败</th><th style="width:70px">状态</th></tr></thead>
+          <tbody id="accs"></tbody>
+        </table>
+        <div class="grid2">
+          <button onclick="addAccount()">＋ 添加账号</button>
+          <button onclick="syncCredits()">↻ 同步积分</button>
+        </div>
+        <table style="margin-top:16px">
+          <thead><tr><th>密钥</th><th style="width:90px">名称</th><th style="width:80px">调用</th><th style="width:70px">状态</th></tr></thead>
+          <tbody id="keys"></tbody>
+        </table>
+        <div class="grid2">
+          <button onclick="newKey()">＋ 签发新密钥</button>
+          <button onclick="toggleKey()">启用 / 停用当前</button>
+        </div>
+      </div>
+    </details>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => (n || 0).toLocaleString('en-US');
+let SK = localStorage.getItem('atlas_sk') || '';
+let MODELS = [];
+
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+function copy(id){
+  const v = $(id).textContent.trim();
+  navigator.clipboard.writeText(v).then(()=>toast('已复制')).catch(()=>toast('复制失败'));
+}
+
+async function load(){
+  const d = await (await fetch('/admin/state')).json();
+  MODELS = d.models;
+  $('poolText').textContent = `${d.pool.accounts} 个账号 · ${fmt(d.pool.credits)} 积分`;
+  $('dot').className = 'dot' + (d.pool.accounts ? '' : ' off');
+  $('baseUrl').textContent = location.origin + '/v1';
+
+  if (!SK && d.keys.length) { SK = d.keys[0].sk; localStorage.setItem('atlas_sk', SK); }
+  $('apiKey').textContent = SK || '（点下方「签发新密钥」）';
+
+  if (!$('model').options.length){
+    $('model').innerHTML = MODELS.map(m=>`<option value="${m.id}">${m.id} — ${m.description}</option>`).join('');
+    $('model').onchange = updateHint;
+    updateHint();
+  }
+
+  $('calls').innerHTML = d.calls.length ? d.calls.map(c=>`<tr>
+      <td class="muted mono">${new Date(c.created_at*1000).toLocaleTimeString('zh-CN',{hour12:false})}</td>
+      <td class="mono">${c.model}</td>
+      <td><span class="badge ${c.status>0&&c.status<300?'ok':'err'}">${c.status||'ERR'}</span></td>
+      <td class="mono muted">${(c.elapsed||0).toFixed(1)}s</td>
+      <td class="muted mono">${(c.account_id||'').replace('acct_','')}</td></tr>`).join('')
+    : `<tr><td colspan="5" class="muted" style="padding:14px 0">还没有调用，点上面「运行」试试</td></tr>`;
+
+  $('accs').innerHTML = d.accounts.length ? d.accounts.map(a=>`<tr>
+      <td>${a.email}</td>
+      <td class="mono">${fmt(a.credits)}</td>
+      <td class="mono"><span style="color:var(--ok)">${a.ok_count}</span> / <span style="color:var(--err)">${a.fail_count}</span></td>
+      <td>${a.enabled?'<span class="badge ok">启用</span>':'<span class="badge idle">停用</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="4" class="muted" style="padding:14px 0">池是空的</td></tr>`;
+
+  $('keys').innerHTML = d.keys.length ? d.keys.map(k=>`<tr>
+      <td class="mono">${k.sk.slice(0,26)}…</td><td>${k.name}</td>
+      <td class="mono">${k.calls}</td>
+      <td>${k.enabled?'<span class="badge ok">有效</span>':'<span class="badge idle">停用</span>'}</td></tr>`).join('')
+    : `<tr><td colspan="4" class="muted" style="padding:14px 0">还没有密钥</td></tr>`;
+}
+
+function updateHint(){
+  const m = MODELS.find(x=>x.id===$('model').value);
+  if (m) $('modelHint').textContent = '参数：' + m.params.join(' · ');
+}
+
+async function runTask(){
+  const model = $('model').value, prompt = $('prompt').value.trim();
+  if (!SK) return toast('先签发一个密钥');
+  if (!prompt) return toast('请输入提示词');
+  const btn = $('runBtn'); btn.disabled = true; btn.textContent = '运行中…';
+  $('result').classList.remove('show'); $('imgs').innerHTML = ''; $('raw').textContent = '';
+  try{
+    const r = await fetch(`/v1/tasks/${model}?wait=true`, {
+      method:'POST',
+      headers:{'Authorization':'Bearer '+SK,'Content-Type':'application/json'},
+      body: JSON.stringify({prompt, aspectRatio:'16:9', enhancePrompt:true, numSamples:1})
+    });
+    const d = await r.json();
+    $('result').classList.add('show');
+    const frames = (d.response && d.response.frames) || [];
+    $('imgs').innerHTML = frames.map(f=>{
+      const u = f.imageAsset && f.imageAsset.url;
+      return u ? `<img src="${u}" alt="result"/>` : '';
+    }).join('');
+    $('raw').textContent = JSON.stringify(d, null, 2).slice(0, 4000);
+  }catch(e){
+    $('result').classList.add('show');
+    $('raw').textContent = '请求失败：' + e;
+  }finally{
+    btn.disabled = false; btn.textContent = '运行'; load();
+  }
+}
+
+async function newKey(){
+  const name = prompt('密钥名称', 'my-app'); if(!name) return;
+  const r = await (await fetch('/admin/keys',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({name})})).json();
+  SK = r.key; localStorage.setItem('atlas_sk', SK); toast('已签发'); load();
+}
+async function toggleKey(){
+  if(!SK) return toast('没有密钥');
+  await fetch(`/admin/keys/${SK}/toggle`,{method:'POST'}); toast('已切换状态'); load();
+}
+async function addAccount(){
+  const email = prompt('账号邮箱（仅作标识）'); if(!email) return;
+  const wlt = prompt('WLT-Api-Key（wl_live_…）'); if(!wlt) return;
+  await fetch('/admin/accounts',{method:'POST',headers:{'content-type':'application/json'},
+    body:JSON.stringify({email, wlt_key:wlt})});
+  toast('已添加'); load();
+}
+async function syncCredits(){
+  const r = await (await fetch('/admin/sync-credits',{method:'POST'})).json();
+  toast(r.ok ? `同步 ${r.synced} 个账号` : (r.msg||'同步失败')); load();
+}
+
+load(); setInterval(load, 4000);
+</script>
+</body>
+</html>

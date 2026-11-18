@@ -1,0 +1,55 @@
+# ======== atlas.worldlabs.ai 注册机配置 ========
+# 复制成 config.yaml 后填。也可以用环境变量覆盖（见大括号）。
+
+captcha:
+  provider: capsolver            # capsolver | yescaptcha | 2captcha | none
+  api_key: ""                    # {CAPTCHA_KEY}
+  sitekey: "0x4AAAAAAAWXJGBD7bONzLBd"     # 实测：Clerk 实例的 Turnstile sitekey
+  page_url: "https://atlas.worldlabs.ai/sign-in"
+  action: "signup"
+  timeout: 120
+  field_style: both              # 双写 snake/camel 字段名，最稳
+
+mail:
+  # 推荐 imap：自建 catch-all 域名 → 任意 local part 都进同一个信箱
+  provider: imap                 # imap | http | mailtm
+  domain: ""                     # {MAIL_DOMAIN}  例如 r.yourdomain.com
+  local_len: 10
+  imap_host: ""                  # {IMAP_HOST}   例如 imap.yourdomain.com
+  imap_port: 993
+  imap_user: ""                  # {IMAP_USER}
+  imap_pass: ""                  # {IMAP_PASS}
+  imap_folder: INBOX
+  # 自建 worker（Cloudflare Email Worker → KV → 这里读）
+  http_url: ""                   # {MAIL_HTTP_URL} 例如 https://mail.yourdomain.com/code?to={addr}
+  http_token: ""                 # {MAIL_HTTP_TOKEN}
+  # 微软 Graph 接码池（provider: ms）
+  ms_accounts_file: ms_accounts.json
+  wait: 180
+
+sms:
+  provider: sms-activate         # sms-activate | 5sim | manual
+  api_key: ""                    # {SMS_KEY}
+  country: "187"                 # sms-activate 国家码，187=美国
+  service: "ot"                  # sms-activate 服务码
+  operator: any
+  max_price: 0.5
+  wait: 240
+  fivesim_country: usa
+  fivesim_product: other
+
+atlas:
+  app_url: "https://atlas.worldlabs.ai"
+  clerk_fapi: "https://clerk.worldlabs.ai"
+  publishable_key: "pk_live_Y2xlcmsud29ybGRsYWJzLmFpJA"
+  clerk_api_version: "2026-08-20"
+  clerk_js_version: "6.43.0"
+  residency_region: US_CANADA   # US_CANADA | LATIN_AMERICA_CARIBBEAN | EU | UK_CH_EEA | OTHER_EUROPE | MIDDLE_EAST_AFRICA | ASIA_PACIFIC
+  default_project_name: "My First World"
+
+run:
+  concurrency: 2                 # FAPI 会 429，别超过 3
+  per_ip_delay: 4.0
+  proxies: []                    # {PROXIES} 逗号分隔，socks5://user:pass@host:port
+  db_path: accounts.db
+  password: ""                   # 留空自动生成

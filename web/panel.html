@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Atlas 注册机</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#f7f8fa; --card:#fff; --line:#e6e8ec; --line-2:#f0f1f4;
+  --txt:#111827; --dim:#6b7280; --mute:#9ca3af;
+  --primary:#2563eb; --primary-2:#1d4ed8; --ok:#059669; --err:#dc2626; --warn:#d97706;
+  --r:12px; --r-sm:8px;
+  --shadow:0 1px 2px rgba(16,24,40,.04), 0 1px 3px rgba(16,24,40,.06);
+}
+body{background:var(--bg);color:var(--txt);font:14px/1.6 -apple-system,BlinkMacSystemFont,"Inter","Segoe UI",Roboto,"PingFang SC",sans-serif;
+  -webkit-font-smoothing:antialiased;padding:28px 20px 60px}
+.wrap{max-width:980px;margin:0 auto}
+header{display:flex;align-items:center;gap:12px;margin-bottom:22px}
+.logo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#3b82f6,#2563eb);
+  display:grid;place-items:center;color:#fff;font-weight:700;font-size:15px;box-shadow:0 2px 6px rgba(37,99,235,.35)}
+h1{font-size:17px;font-weight:650;letter-spacing:-.2px}
+h1 span{font-weight:400;color:var(--mute);font-size:12.5px;margin-left:8px}
+.spacer{flex:1}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px 20px;margin-bottom:14px}
+.card h2{font-size:12px;font-weight:600;color:var(--dim);letter-spacing:.4px;text-transform:uppercase;margin-bottom:12px}
+button{font:inherit;font-size:13px;font-weight:500;border-radius:var(--r-sm);padding:9px 16px;
+  border:1px solid var(--line);background:#fff;color:var(--txt);cursor:pointer;transition:.15s;white-space:nowrap}
+button:hover{background:#f9fafb;border-color:#d1d5db}
+button.primary{background:var(--primary);border-color:var(--primary);color:#fff;box-shadow:0 1px 2px rgba(37,99,235,.25)}
+button.primary:hover{background:var(--primary-2)}
+button.danger{color:#b91c1c;border-color:#fecaca;background:#fef2f2}
+button.danger:hover{background:#fee2e2}
+button:disabled{opacity:.45;cursor:not-allowed}
+input,select{font:inherit;font-size:13.5px;padding:8px 11px;border:1px solid var(--line);
+  border-radius:var(--r-sm);background:#fff;color:var(--txt);outline:none}
+input:focus,select:focus{border-color:#93b4fb;box-shadow:0 0 0 3px rgba(37,99,235,.09)}
+.controls{display:grid;grid-template-columns:auto auto 1fr auto;gap:16px;align-items:end}
+.ctl{display:flex;flex-direction:column;gap:6px}
+.ctl label{font-size:11.5px;color:var(--mute);letter-spacing:.3px}
+.ctl input{width:88px}
+.seg{display:flex;border:1px solid var(--line);border-radius:var(--r-sm);overflow:hidden;background:#fafbfc}
+.seg button{border:none;border-radius:0;background:transparent;color:var(--dim);padding:8px 14px;font-size:12.5px}
+.seg button.on{background:#fff;color:var(--primary);font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.stats{display:flex;gap:26px;flex-wrap:wrap;margin-bottom:4px}
+.stat{display:flex;flex-direction:column}
+.stat b{font-size:21px;font-weight:650;letter-spacing:-.4px}
+.stat small{font-size:11.5px;color:var(--mute)}
+.progress{height:6px;background:#eef0f4;border-radius:999px;overflow:hidden;margin:14px 0 4px}
+.progress span{display:block;height:100%;width:0;background:linear-gradient(90deg,#3b82f6,#2563eb);
+  border-radius:999px;transition:width .35s ease}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{text-align:left;font-weight:500;color:var(--mute);font-size:11.5px;letter-spacing:.3px;
+  text-transform:uppercase;padding:0 0 9px;border-bottom:1px solid var(--line-2)}
+td{padding:10px 0;border-bottom:1px solid var(--line-2);vertical-align:middle;white-space:nowrap}
+tr:last-child td{border-bottom:none}
+.mono{font-family:ui-monospace,Menlo,monospace;font-size:12px;font-variant-numeric:tabular-nums}
+.badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:500}
+.badge.ok{background:#ecfdf5;color:#047857}
+.badge.err{background:#fef2f2;color:#b91c1c}
+.badge.run{background:#eff6ff;color:#1d4ed8}
+.badge.idle{background:#f3f4f6;color:#6b7280}
+.bar{width:120px;height:5px;background:#eef0f4;border-radius:999px;overflow:hidden;display:inline-block;
+  vertical-align:middle;margin-right:8px}
+.bar span{display:block;height:100%;background:#3b82f6;border-radius:999px;transition:width .3s}
+.bar.ok span{background:var(--ok)} .bar.err span{background:var(--err)}
+.stage{font-size:12px;color:var(--dim)}
+.muted{color:var(--mute)}
+details{margin-top:8px}
+summary{cursor:pointer;font-size:12.5px;color:var(--dim);list-style:none;padding:9px 0;
+  display:flex;align-items:center;gap:6px;user-select:none}
+summary::-webkit-details-marker{display:none}
+summary:before{content:"›";display:inline-block;transition:.2s;font-size:15px;color:var(--mute)}
+details[open] summary:before{transform:rotate(90deg)}
+.logbox{height:190px;overflow:auto;background:#0f172a;color:#cbd5e1;border-radius:var(--r-sm);
+  padding:11px 13px;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;line-height:1.7}
+.logbox .t{color:#475569;margin-right:8px}
+.logbox .ok{color:#4ade80}.logbox .err{color:#f87171}
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);opacity:0;
+  background:#111827;color:#fff;padding:9px 16px;border-radius:9px;font-size:13px;transition:.22s;pointer-events:none;z-index:99}
+.toast.show{opacity:1;transform:translateX(-50%)}
+.hint{font-size:11.8px;color:var(--mute);margin-top:6px}
+.cfg{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.cfg .full{grid-column:1/-1}
+.cfg .ctl input,.cfg .ctl select{width:100%}
+@media(max-width:760px){.controls{grid-template-columns:1fr 1fr}.cfg{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">A</div>
+    <h1>Atlas 注册机<span>World Labs</span></h1>
+    <div class="spacer"></div>
+    <button onclick="location.href='/api/export'">导出账号</button>
+  </header>
+
+  <div class="card">
+    <h2>开始</h2>
+    <div class="controls">
+      <div class="ctl">
+        <label>模式</label>
+        <div class="seg" id="seg">
+          <button data-mode="demo" class="on">演示</button>
+          <button data-mode="live">实跑</button>
+        </div>
+      </div>
+      <div class="ctl"><label>数量</label><input id="count" type="number" value="3" min="1" max="200"/></div>
+      <div class="ctl"><label>并发</label><input id="conc" type="number" value="2" min="1" max="5"/></div>
+      <div style="display:flex;gap:8px">
+        <button class="primary" id="startBtn" onclick="start()">开始注册</button>
+        <button class="danger" id="stopBtn" onclick="stop()" disabled>停止</button>
+      </div>
+    </div>
+    <div class="hint">演示模式不联网、不花钱，用来确认流程；实跑需要先填好「配置」里的接码与邮箱。</div>
+  </div>
+
+  <div class="card">
+    <h2>进度</h2>
+    <div class="stats">
+      <div class="stat"><b id="sTotal">0</b><small>任务</small></div>
+      <div class="stat"><b id="sOk" style="color:var(--ok)">0</b><small>成功</small></div>
+      <div class="stat"><b id="sFail" style="color:var(--err)">0</b><small>失败</small></div>
+      <div class="stat"><b id="sCredit">0</b><small>累计积分</small></div>
+      <div class="stat"><b id="sElapsed">0s</b><small>耗时</small></div>
+    </div>
+    <div class="progress"><span id="pbar"></span></div>
+    <div class="hint" id="pText">还没有开始</div>
+  </div>
+
+  <div class="card">
+    <h2>任务</h2>
+    <table>
+      <thead><tr><th style="width:36px">#</th><th>邮箱</th><th style="width:250px">进度</th><th style="width:72px">积分</th><th style="width:74px">状态</th></tr></thead>
+      <tbody id="rows"><tr><td colspan="5" class="muted" style="padding:16px 0">还没有任务</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>日志</h2>
+    <div class="logbox" id="logs"><span class="muted">等待开始…</span></div>
+  </div>
+
+  <div class="card">
+    <h2>配置</h2>
+    <div class="cfg">
+      <div class="ctl"><label>邮箱来源</label>
+        <select id="mailProvider">
+          <option value="msowa">hotmail（浏览器登录接码 · 已验证）</option>
+          <option value="imap">IMAP（自有域名 catch-all）</option>
+          <option value="http">HTTP 收件箱（Email Worker）</option>
+        </select></div>
+      <div class="ctl"><label>hotmail 地址</label><input id="msEmail" placeholder="you@hotmail.com"/></div>
+      <div class="ctl full"><label>接码平台 Key（hero-sms / sms-activate）</label>
+        <input id="smsKey" placeholder="hero-sms api_key"/></div>
+      <div class="ctl"><label>打码服务 Key（可选）</label><input id="captchaKey" placeholder="忽略则用浏览器自动过 Turnstile"/></div>
+      <div class="ctl"><label>代理</label><input id="proxy" placeholder="http://127.0.0.1:7890"/></div>
+    </div>
+    <div style="margin-top:14px;display:flex;gap:8px">
+      <button class="primary" onclick="saveCfg()">保存配置</button>
+      <button onclick="loadCfg()">重新读取</button>
+    </div>
+    <div class="hint">改动会写入 <code>config.yaml</code>，命令行走同一份配置。</div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = n => (n || 0).toLocaleString('en-US');
+let MODE = 'demo';
+
+function toast(msg){
+  const t = $('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 1800);
+}
+document.querySelectorAll('#seg button').forEach(b=>{
+  b.onclick = ()=>{ MODE = b.dataset.mode;
+    document.querySelectorAll('#seg button').forEach(x=>x.classList.toggle('on', x===b));
+    $('startBtn').textContent = MODE==='demo' ? '开始演示' : '开始注册'; };
+});
+
+async function start(){
+  const r = await fetch('/api/start',{method:'POST',headers:{'content-type':'application/json'},
+    body: JSON.stringify({mode:MODE, count:+$('count').value, concurrency:+$('conc').value})});
+  const d = await r.json();
+  if(!d.ok) toast(d.error || '启动失败');
+}
+async function stop(){ await fetch('/api/stop',{method:'POST'}); }
+
+async function loadCfg(){
+  const c = await (await fetch('/api/config')).json();
+  $('mailProvider').value = c.mail.provider || 'msowa';
+  $('msEmail').value = c.mail.ms_email || '';
+  $('smsKey').value = c.sms.api_key || '';
+  $('captchaKey').value = c.captcha.api_key || '';
+  $('proxy').value = (c.run.proxies||[])[0] || '';
+}
+async function saveCfg(){
+  const body = {
+    mail:{provider:$('mailProvider').value, ms_email:$('msEmail').value},
+    sms:{api_key:$('smsKey').value},
+    captcha:{api_key:$('captchaKey').value},
+    run:{proxies:$('proxy').value}
+  };
+  await fetch('/api/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  toast('已保存');
+}
+
+let LAST_LOG = '';
+async function poll(){
+  let d;
+  try { d = await (await fetch('/api/state')).json(); } catch(e){ return; }
+  const s = d.stats;
+  $('sTotal').textContent = s.total;
+  $('sOk').textContent = s.ok;
+  $('sFail').textContent = s.failed;
+  $('sCredit').textContent = fmt(s.credits);
+  $('sElapsed').textContent = (s.elapsed||0).toFixed(0) + 's';
+  $('startBtn').disabled = s.running_batch;
+  $('stopBtn').disabled = !s.running_batch;
+
+  const done = s.ok + s.failed;
+  const pct = s.total ? Math.round(done / s.total * 100) : 0;
+  $('pbar').style.width = pct + '%';
+  $('pText').textContent = s.total ? `${done}/${s.total} 完成 · ${s.running} 进行中 · ${pct}%`
+                                   : '还没有开始';
+
+  $('rows').innerHTML = d.tasks.length ? d.tasks.map(t=>{
+    const cls = t.status==='ok'?'ok':(t.status==='failed'?'err':'');
+    const badge = t.status==='ok'?'<span class="badge ok">成功</span>'
+      : t.status==='failed'?'<span class="badge err">失败</span>'
+      : t.status==='running'?'<span class="badge run">进行中</span>'
+      : t.status==='stopped'?'<span class="badge idle">停止</span>'
+      : '<span class="badge idle">排队</span>';
+    return `<tr>
+      <td class="muted mono">${t.idx}</td>
+      <td class="mono">${t.email || '<span class="muted">等待分配</span>'}</td>
+      <td><span class="bar ${cls}"><span style="width:${t.progress}%"></span></span>
+          <span class="stage">${t.stage_label}</span></td>
+      <td class="mono" style="color:${t.credits?'var(--ok)':'var(--mute)'}">${t.credits?fmt(t.credits):'—'}</td>
+      <td>${badge}</td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="muted" style="padding:16px 0">还没有任务</td></tr>';
+
+  const box = $('logs');
+  const html = d.logs.map(l=>`<div class="${l.level}"><span class="t">${l.t}</span>${l.msg}</div>`).join('');
+  if (html !== LAST_LOG){
+    const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 50;
+    box.innerHTML = html || '<span class="muted">等待开始…</span>';
+    LAST_LOG = html;
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+}
+
+loadCfg(); poll(); setInterval(poll, 900);
+</script>
+</body>
+</html>
