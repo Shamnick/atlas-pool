@@ -51,6 +51,10 @@ pre{background:#0f172a;color:#cbd5e1;border-radius:var(--r-sm);padding:12px 14px
 .result{margin-top:14px;display:none}
 .result.show{display:block}
 .imgs{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;margin-bottom:12px}
+.filecard{display:block;border:1px solid var(--line);border-radius:var(--r-sm);padding:14px;text-decoration:none;color:inherit;background:#fafbfc}
+.filecard:hover{border-color:#c7d2fe;background:#f5f7ff}
+.fc-name{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#1f2937;word-break:break-all}
+.fc-sub{font-size:11.5px;color:var(--mute);margin-top:4px}
 .imgs img{width:100%;border-radius:var(--r-sm);border:1px solid var(--line);display:block}
 table{width:100%;border-collapse:collapse;font-size:12.5px}
 th{text-align:left;font-weight:500;color:var(--mute);font-size:11.5px;letter-spacing:.3px;
@@ -177,7 +181,14 @@ async function load(){
   $('apiKey').textContent = SK || '（点下方「签发新密钥」）';
 
   if (!$('model').options.length){
-    $('model').innerHTML = MODELS.map(m=>`<option value="${m.id}">${m.id} — ${m.description}</option>`).join('');
+    const groups = {};
+    MODELS.forEach(m => (groups[m.category || 'other'] ||= []).push(m));
+    const LABEL = {image:'图像', 'other':'其它'};
+    $('model').innerHTML = Object.entries(groups).map(([cat, list])=>{
+      const label = cat === '3d' ? '3D / 重建' : (LABEL[cat] || cat);
+      return `<optgroup label="${label}">` + list.map(m=>
+        `<option value="${m.id}">${m.id} — ${m.description}</option>`).join('') + '</optgroup>';
+    }).join('');
     $('model').onchange = updateHint;
     updateHint();
   }
@@ -206,7 +217,7 @@ async function load(){
 
 function updateHint(){
   const m = MODELS.find(x=>x.id===$('model').value);
-  if (m) $('modelHint').textContent = '参数：' + m.params.join(' · ');
+  if (m) $('modelHint').textContent = (m.category==='3d'?'3D 任务 · ':'') + '参数：' + m.params.join(' · ');
 }
 
 async function runTask(){
@@ -223,11 +234,31 @@ async function runTask(){
     });
     const d = await r.json();
     $('result').classList.add('show');
-    const frames = (d.response && d.response.frames) || [];
-    $('imgs').innerHTML = frames.map(f=>{
+    const resp = d.response || {};
+    const frames = resp.frames || [];
+    let html = frames.map(f=>{
       const u = f.imageAsset && f.imageAsset.url;
       return u ? `<img src="/admin/image?url=${encodeURIComponent(u)}" alt="result" loading="lazy"/>` : '';
     }).join('');
+
+    // 3D 产物（.spz 点云 / .glb 网格）→ 给下载卡片
+    const res = [];
+    (function walk(n){
+      if (!n) return;
+      if (Array.isArray(n)) return n.forEach(walk);
+      if (typeof n !== 'object') return;
+      if (n.url && /asset_|storage\.googleapis/.test(n.url + (n.assetId||''))){
+        const name = (n.url.match(/filename%3D%22([^%]+)%22/)||[])[1] || (n.assetId||'asset');
+        res.push({url:n.url, name});
+      }
+      Object.values(n).forEach(walk);
+    })(resp.refinedSplats || resp.mesh || resp.splatAsset || null);
+    if (res.length){
+      html += res.map(r=>`<a class="filecard" href="/admin/image?url=${encodeURIComponent(r.url)}" target="_blank">
+        <div class="fc-name">${r.name}</div><div class="fc-sub">点击下载 3D 资源</div></a>`).join('');
+    }
+    if (!html) html = `<div class="muted" style="font-size:12.5px">任务已完成，产物见下方 JSON</div>`;
+    $('imgs').innerHTML = html;
     $('raw').textContent = JSON.stringify(d, null, 2).slice(0, 4000);
   }catch(e){
     $('result').classList.add('show');

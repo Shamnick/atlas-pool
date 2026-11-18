@@ -152,6 +152,49 @@ depth = {"depthAsset": pose_frame["depth"]["depthAsset"]}
 
 ---
 
+## 5. posedImages2Splats【3D】
+
+```json
+{
+  "posedFrames": [
+    {"imageAsset": {"assetId": "asset_A"}, "depth": {"depthAsset": {"assetId": "asset_A_d"}},
+     "camera": {"extrinsics": {…}, "intrinsics": {…}}, "maskAsset": {…}},
+    {"imageAsset": {"assetId": "asset_B"}, "depth": {"depthAsset": {"assetId": "asset_B_d"}},
+     "camera": {"extrinsics": {…}, "intrinsics": {…}}, "maskAsset": {…}}
+  ]
+}
+```
+
+- **至少 2 帧**，否则 `422 List should have at least 2 items`
+- 帧里**不能带 `centroidWorld`**（`images2PosedRGBD` 的输出带这个字段），否则
+  `422 Extra inputs are not permitted`
+- 返回 `RUNNING` → 轮询 `operations/{id}`，约 2–3 分钟后 `SUCCEEDED`
+
+```json
+{"done": true, "response": {
+  "draftSplat": null,
+  "refinedSplats": {
+    "2000000": {"assetId": "asset_…", "url": "https://storage.googleapis.com/…/asset_….spz?X-Goog-Signature=…"}
+  }}}
+```
+
+`refinedSplats` 的键是点数档位（`2000000` = 200 万点），值是 `.spz`（Gaussian Splat）资源。
+
+## 6. splats2Mesh【3D】
+
+```json
+{"splatAsset": {"assetId": "asset_2ab91c69…"}}
+```
+
+返回（也是长任务，约 1 分钟）：
+
+```json
+{"done": true, "response": {
+  "anchorPositions": [[2.699, 1.688, -0.299], …],
+  "colliderBoxes": null,
+  "mesh": {"assetId": "asset_f00e2f9e…", "url": "https://storage.googleapis.com/…/asset_….glb?…"}}}
+```
+
 ## 完整链路示例
 
 ```python
@@ -186,6 +229,40 @@ gen = httpx.post(f"{BASE}/tasks:atlasGenerate?wait=true", headers=H, json={
 print(gen["response"]["frames"][0]["imageAsset"]["url"])
 ```
 
+## 3D 链路示例
+
+```python
+# 1) 生成两张图
+assets = []
+for i in range(2):
+    d = httpx.post(f"{BASE}/tasks:atlasTextToImage?wait=true", headers=H,
+                   json={"prompt": f"a sunlit stone courtyard, angle {i+1}", "aspectRatio": "16:9"}).json()
+    assets.append(d["response"]["frames"][0]["imageAsset"]["assetId"])
+
+# 2) 估位姿（至少 2 帧）
+pose = httpx.post(f"{BASE}/tasks:images2PosedRGBD?wait=true", headers=H, json={
+    "frames": [{"imageAsset": {"assetId": a}} for a in assets],
+    "targetResolution": [1280, 720]}).json()
+frames = [{k: v for k, v in f.items() if k != "centroidWorld"}      # 关键：剔除 centroidWorld
+          for f in pose["response"]["frames"]]
+
+# 3) 多视图 → splats（长任务，轮询）
+sub = httpx.post(f"{BASE}/tasks:posedImages2Splats?wait=true", headers=H,
+                 json={"posedFrames": frames}).json()
+while not sub.get("done"):
+    time.sleep(5)
+    sub = httpx.get(f"{BASE}/operations/{sub['id']}?wait=true", headers=H).json()
+splat = list(sub["response"]["refinedSplats"].values())[0]["assetId"]
+
+# 4) splats → mesh
+sub = httpx.post(f"{BASE}/tasks:splats2Mesh?wait=true", headers=H,
+                 json={"splatAsset": {"assetId": splat}}).json()
+while not sub.get("done"):
+    time.sleep(5)
+    sub = httpx.get(f"{BASE}/operations/{sub['id']}?wait=true", headers=H).json()
+print(sub["response"]["mesh"]["url"])
+```
+
 ## 错误码速查
 
 | HTTP | 含义 | 处理 |
@@ -193,5 +270,8 @@ print(gen["response"]["frames"][0]["imageAsset"]["url"])
 | 401 | `missing Authorization header` | 用 `WLT-Api-Key`，不是 Clerk JWT |
 | 422 `Field required` | 缺必填参数 | 看 `detail[].loc` |
 | 422 `confidenceAsset` | atlasChisel 深度字段冗余 | 只留 `depthAsset` |
+| 422 `centroidWorld` | posedFrames 不接受该字段 | 从 images2PosedRGBD 输出里剔除 |
+| 422 `too_short` | posedFrames < 2 | 至少两帧 |
+| `done:false / RUNNING` | 长任务 | 轮询 operations |
 | 429 | 触发限流 | 退避重试 |
 | 404 `accounts/accounts/…` | account 名带前缀 | 去掉 `accounts/` |

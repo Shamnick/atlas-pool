@@ -45,36 +45,34 @@ ATLAS = "https://atlas.worldlabs.ai/api/v2"
 
 MODELS = [
     {
-        "id": "atlasTextToImage",
-        "object": "model",
-        "owned_by": "worldlabs",
-        "description": "文生图：从文本提示生成世界导向的图像",
-        "params": ["prompt", "aspectRatio?", "seed?"],
-        "credits_hint": "按张计费",
+        "id": "atlasTextToImage", "object": "model", "owned_by": "worldlabs", "category": "image",
+        "description": "文生图：从文本提示生成世界导向的场景图",
+        "params": ["prompt", "aspectRatio?", "enhancePrompt?", "numSamples?"],
     },
     {
-        "id": "images2PosedRGBD",
-        "object": "model",
-        "owned_by": "worldlabs",
-        "description": "图 → 相机位姿 + 线性深度",
-        "params": ["images[]", "returnDepth?"],
-        "credits_hint": "按图计费",
+        "id": "images2PosedRGBD", "object": "model", "owned_by": "worldlabs", "category": "3d",
+        "description": "图像 → 相机位姿 + 线性深度（3D 重建第一步）",
+        "params": ["frames[].imageAsset.assetId", "targetResolution?", "canonicalizeToFirstFrame?"],
     },
     {
-        "id": "atlasGenerate",
-        "object": "model",
-        "owned_by": "worldlabs",
-        "description": "给定位姿/深度上下文 + 提示，生成新视角",
-        "params": ["prompt", "contextFrames[]", "targetCameras[]", "enhancePrompt?", "returnDepth?"],
-        "credits_hint": "按视角计费",
+        "id": "atlasGenerate", "object": "model", "owned_by": "worldlabs", "category": "image",
+        "description": "已知位姿/深度上下文 → 生成新视角画面",
+        "params": ["contextFrames[]", "targetCameras[]", "prompt", "returnDepth?"],
     },
     {
-        "id": "atlasChisel",
-        "object": "model",
-        "owned_by": "worldlabs",
-        "description": "按深度目标帧 + 提示生成视角（Chisel）",
-        "params": ["prompt", "targetFrames[]"],
-        "credits_hint": "按视角计费",
+        "id": "atlasChisel", "object": "model", "owned_by": "worldlabs", "category": "image",
+        "description": "深度目标帧 + 提示 → 生成对应视角",
+        "params": ["targetFrames[]", "prompt", "returnDepth?"],
+    },
+    {
+        "id": "posedImages2Splats", "object": "model", "owned_by": "worldlabs", "category": "3d",
+        "description": "带位姿的多视图 → 3D Gaussian Splats（至少 2 帧，长任务）",
+        "params": ["posedFrames[] (>=2)"],
+    },
+    {
+        "id": "splats2Mesh", "object": "model", "owned_by": "worldlabs", "category": "3d",
+        "description": "Splats → 三角网格（mesh）",
+        "params": ["splatAsset.assetId"],
     },
 ]
 MODEL_IDS = {m["id"] for m in MODELS}
@@ -262,7 +260,9 @@ async def submit(model: str, request: Request):
     except Exception:  # noqa: BLE001
         return _err(400, "body 必须是 JSON")
 
-    wait = "wait=true" in str(request.url).lower()
+    q = str(request.url).lower()
+    wait = "wait=true" in q or "wait=full" in q
+    wait_full = "wait=false" not in q            # 默认等到真正 done（长任务自动轮询）
     url = f"{ATLAS}/tasks:{model}" + ("?wait=true" if wait else "")
     headers = {
         "WLT-Api-Key": acc["wlt_key"],
@@ -273,6 +273,25 @@ async def submit(model: str, request: Request):
     try:
         async with httpx.AsyncClient(proxy=_proxy(), timeout=600) as c:
             r = await c.post(url, content=body, headers=headers)
+            try:
+                submitted = r.json()
+            except Exception:  # noqa: BLE001
+                submitted = {}
+            # 长任务（splat / mesh）wait=true 只返回 RUNNING，需要轮询到 done
+            if (wait_full and r.status_code < 300 and isinstance(submitted, dict)
+                    and submitted.get("id") and not submitted.get("done")):
+                op_id = submitted["id"]
+                deadline = time.time() + 900
+                while time.time() < deadline:
+                    await asyncio.sleep(4)
+                    rr = await c.get(f"{ATLAS}/operations/{op_id}?wait=true",
+                                     headers={"WLT-Api-Key": acc["wlt_key"]})
+                    if rr.status_code >= 400:
+                        break
+                    cur = rr.json()
+                    if cur.get("done"):
+                        r = rr
+                        break
         elapsed = time.time() - t0
         POOL.bump_key(sk)
         data: Any
