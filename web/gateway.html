@@ -138,6 +138,23 @@ tr.hover:hover td{background:rgba(255,255,255,.012)}
 .model .id{font-family:var(--mono);font-size:12.5px;font-weight:500;color:#dbe1ff}
 .model .desc{font-size:11.5px;color:var(--fg-2);line-height:1.55;margin-bottom:9px}
 .model .meta{display:flex;gap:8px;flex-wrap:wrap;font-size:10.5px;color:var(--fg-3);font-family:var(--mono)}
+.model .act{display:flex;align-items:center;gap:9px;margin-top:11px}
+.model .st{font-size:11px;color:var(--fg-3);font-family:var(--mono)}
+.model .st.ok{color:var(--ok)} .model .st.err{color:var(--err)} .model .st.run{color:#9db0ff}
+.model .out{margin-top:11px;display:none}
+.model .out.show{display:block}
+.model .out .imgs{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px}
+.model .out .imgs img{width:100%;height:120px;object-fit:cover;border-radius:6px;
+  border:1px solid var(--line);display:block;background:#000}
+.model .out .row{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.model .out .txt{font-size:11px;color:var(--fg-2);background:#06070a;border:1px solid var(--line);
+  border-radius:6px;padding:9px 10px;max-height:120px;overflow:auto;white-space:pre-wrap}
+.model .out .file{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;
+  color:#9db0ff;border:1px solid var(--line);border-radius:6px;padding:7px 9px;text-decoration:none}
+.model .out .file:hover{border-color:rgba(109,140,255,.45)}
+.badge{font-size:9.5px;padding:1px 6px;border-radius:4px;border:1px solid var(--line);color:var(--fg-3)}
+.badge.live{color:var(--ok);border-color:rgba(62,207,142,.3)}
+.badge.cache{color:var(--warn);border-color:rgba(245,165,36,.3)}
 
 /* ---------- toast ---------- */
 .toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(14px);
@@ -145,6 +162,9 @@ tr.hover:hover td{background:rgba(255,255,255,.012)}
   font-size:12.5px;opacity:0;transition:.22s;pointer-events:none;z-index:99;box-shadow:0 12px 32px -12px #000}
 .toast.show{opacity:1;transform:translateX(-50%)}
 
+.warn{border:1px solid rgba(245,165,36,.35);background:rgba(245,165,36,.08);color:#f5c76a;
+  border-radius:var(--r-sm);padding:10px 14px;font-size:12px;margin-bottom:14px;line-height:1.6}
+.warn b{color:#ffd591}
 .hidden{display:none !important}
 @media(max-width:860px){
   .stats{grid-template-columns:1fr 1fr}
@@ -165,6 +185,8 @@ tr.hover:hover td{background:rgba(255,255,255,.012)}
     <div class="spacer"></div>
     <div class="status"><span class="led" id="led"></span><span id="statusText">连接中</span></div>
   </header>
+
+  <div id="warn" class="warn hidden"></div>
 
   <nav id="nav">
     <button data-tab="overview" class="on">概览</button>
@@ -231,7 +253,12 @@ tr.hover:hover td{background:rgba(255,255,255,.012)}
   <!-- ============ 模型 ============ -->
   <section id="tab-models" class="hidden">
     <div class="card">
-      <div class="eyebrow">可用模型 <span class="muted" style="text-transform:none;letter-spacing:0">GET /v1/models</span></div>
+      <div class="eyebrow">可用模型
+        <span style="display:flex;gap:8px;align-items:center">
+          <span class="muted" style="text-transform:none;letter-spacing:0" id="demoHint">每个都能一键试跑</span>
+          <button class="primary" onclick="demoAll()">全部试跑</button>
+        </span>
+      </div>
       <div class="models" id="modelGrid"></div>
     </div>
   </section>
@@ -309,6 +336,16 @@ async function load(){
   if (!SK && d.keys.length){ SK = d.keys[0].sk; localStorage.setItem('atlas_sk', SK); }
   $('apiKey').textContent = SK || '（到「账号」页签发一个）';
 
+  // 账号权限提示
+  const ent = d.ent || {};
+  if (ent.apiAllowed === false) {
+    $('warn').classList.remove('hidden');
+    $('warn').innerHTML = `<b>账号 API 权限已被平台关闭</b>（entitlements.developerApiUsageAllowed = false）——
+      积分余额还在（${fmt(d.pool.credits)}），但新任务会被 402 拒绝。试跑会回退到本账号此前真实跑通的结果。`;
+  } else if (ent.apiAllowed === true) {
+    $('warn').classList.add('hidden');
+  }
+
   $('sAcc').textContent = d.pool.accounts;
   $('sCred').textContent = fmt(d.pool.credits);
   $('sCalls').textContent = fmt(d.pool.calls_24h);
@@ -327,11 +364,16 @@ async function load(){
   }
   if (!$('modelGrid').children.length){
     $('modelGrid').innerHTML = MODELS.map(m=>`
-      <div class="model">
+      <div class="model" id="m-${m.id}">
         <div class="top"><span class="id">${m.id}</span>
-          <span class="tag ${m.category==='3d'?'d3':'img'}">${m.category==='3d'?'3D':'图像'}</span></div>
+          <span class="tag ${m.category==='3d'||m.category==='web'?'d3':'img'}">${catLabel(m)}</span></div>
         <div class="desc">${esc(m.description)}</div>
         <div class="meta"><span>${esc((m.params||[]).join(' · '))}</span><span>·</span><span>${m.latency||''}</span></div>
+        <div class="act">
+          <button onclick="demo('${m.id}')" id="btn-${m.id}">试跑</button>
+          <span class="st" id="st-${m.id}"></span>
+        </div>
+        <div class="out" id="out-${m.id}"></div>
       </div>`).join('');
   }
 
@@ -364,6 +406,70 @@ async function load(){
       <td class="mono">${k.calls}</td>
       <td>${k.enabled?'<span class="tag ok">有效</span>':'<span class="tag dim">停用</span>'}</td></tr>`).join('')
     : `<tr><td colspan="4" class="muted" style="padding:16px 0">还没有密钥</td></tr>`;
+}
+
+function catLabel(m){
+  const p=m.provider||'atlas-dev';
+  if(p==='atlas-web') return '站内';
+  return m.category==='3d' ? '3D' : '图像';
+}
+
+function pickAsset(o, depth=0){
+  // 从任意结构里找图片 url 和文件 url
+  const imgs=[], files=[];
+  (function walk(n){
+    if(!n||depth>8) return;
+    if(Array.isArray(n)) return n.forEach(walk);
+    if(typeof n!=='object') return;
+    if(n.url && typeof n.url==='string' && /^https?:\/\//.test(n.url)){
+      const name=((n.url.match(/filename%3D%22([^%]+)%22/)||[])[1]||n.assetId||'asset');
+      if(/\.(spz|obj|glb|ply|gltf)$/i.test(name)||/splat|mesh/i.test(name)) files.push({url:n.url,name});
+      else imgs.push({url:n.url,name});
+    }
+    Object.values(n).forEach(walk);
+  })(o);
+  return {imgs,files};
+}
+
+async function demo(id){
+  const btn=$('btn-'+id), st=$('st-'+id), out=$('out-'+id);
+  btn.disabled=true; st.className='st run'; st.textContent='运行中…'; out.classList.remove('show');
+  const t0=Date.now();
+  try{
+    const r=await fetch('/admin/demo/'+id, {method:'POST'});
+    const d=await r.json();
+    const live = d.ok;
+    const src = live ? (d.result||{}) : ((d.cached||{}).result||{});
+    const {imgs,files}=pickAsset(src);
+    let html='';
+    if(imgs.length){
+      html += '<div class="imgs">' + imgs.slice(0,2).map(i=>
+        `<img src="/admin/image?url=${encodeURIComponent(i.url)}" loading="lazy"
+              onerror="this.style.display='none'"/>`).join('') + '</div>';
+    }
+    if(files.length){
+      html += files.slice(0,3).map(f=>`<a class="file" href="/admin/image?url=${encodeURIComponent(f.url)}" target="_blank">
+        <span>◈</span><span>${esc(f.name).slice(0,42)}</span></a>`).join('');
+    }
+    if(!imgs.length && !files.length && src && typeof src==='object'){
+      const keys=Object.keys(src).slice(0,6);
+      html += `<div class="txt">${esc(JSON.stringify(src,null,1)).slice(0,600)}</div>`;
+    }
+    const badge = live ? `<span class="badge live">实时</span>` : `<span class="badge cache">示例</span>`;
+    if(html){ out.innerHTML=html; out.classList.add('show'); }
+    st.className='st '+(live?'ok':'err');
+    st.innerHTML = `${badge} ${d.elapsed||((Date.now()-t0)/1000).toFixed(1)}s`;
+    if(!live && d.hint) st.title = d.hint;
+  }catch(e){
+    st.className='st err'; st.textContent='失败：'+e.message;
+  }finally{ btn.disabled=false; }
+}
+
+async function demoAll(){
+  const ids=[...document.querySelectorAll('.model')].map(e=>e.id.replace('m-',''));
+  $('demoHint').textContent='逐个试跑中…';
+  for(const id of ids){ await demo(id); }
+  $('demoHint').textContent='全部完成';
 }
 
 function hint(){

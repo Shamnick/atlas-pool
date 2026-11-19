@@ -35,3 +35,4 @@ Thumbs.db
 /tmp/
 *.tmp
 clerk_session.json
+probe/seed.json

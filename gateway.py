@@ -565,6 +565,119 @@ async def operation(op_id: str, request: Request):
         return _err(502, r.text[:500], "upstream_error")
 
 
+# ---------------------------------------------------------------- 一键试跑
+async def _demo_upload(path) -> str:
+    """把本地图片上传成 asset，返回 assetId。"""
+    acc = await POOL.pick()
+    if not acc:
+        raise RuntimeError("账号池为空")
+    data = Path(path).read_bytes()
+    mime = "image/png" if str(path).endswith(".png") else "image/jpeg"
+    size = str(len(data))
+    r = await upstream("POST", "/assets", acc["wlt_key"], body=json.dumps(
+        {"asset": {"displayName": Path(path).name, "type": "image",
+                   "parts": [{"role": "rgb", "contentType": mime, "contentLength": size}]}}
+    ).encode(), idem=uuid.uuid4().hex)
+    if r.status_code >= 300:
+        raise RuntimeError(f"建资产失败 {r.status_code}: {r.text[:200]}")
+    aid = r.json()["id"]
+    r = await upstream("POST", f"/assets/{aid}:createUploadUrls", acc["wlt_key"],
+                       body=json.dumps({"parts": [{"role": "rgb", "contentType": mime,
+                                                   "contentLength": size}]}).encode())
+    up = r.json()["uploads"][0]
+    async with httpx.AsyncClient(timeout=300) as raw:
+        pr = await raw.put(up["url"], content=data, headers=up["headers"])
+    if pr.status_code >= 300:
+        raise RuntimeError(f"上传失败 {pr.status_code}")
+    r = await upstream("POST", f"/assets/{aid}:completeUpload", acc["wlt_key"], body=b"{}")
+    if r.status_code >= 300:
+        raise RuntimeError(f"complete 失败 {r.status_code}")
+    return aid
+
+
+async def _demo_call(model: str, body: dict, wait: bool):
+    """demo 用：站内模型走 JWT，其余走 WLT key。"""
+    payload = json.dumps(body).encode()
+    if model in WEB_IDS:
+        wc = await web_ctx()
+        cs = clerk()
+        assert cs is not None
+        url = (f"{ATLAS}/accounts/{wc['acct']}/projects/{wc['proj']}"
+               f"/web-api/sessions/{wc['wsess']}/tasks:{model}")
+        async with httpx.AsyncClient(timeout=1200, proxy=PROXY) as c:
+            r = await c.post(url, content=payload, headers=cs.headers())
+            data = r.json() if r.status_code < 300 else {"detail": r.text[:400]}
+            if r.status_code < 300 and isinstance(data, dict) and data.get("id") and wait:
+                deadline = time.time() + LONG_TASK_TIMEOUT
+                op = data["id"]
+                while not data.get("done") and time.time() < deadline:
+                    await asyncio.sleep(4)
+                    try:
+                        rr = await c.get(f"{ATLAS}/operations/{op}?wait=true", headers=cs.headers())
+                        if rr.status_code < 400:
+                            data = rr.json()
+                    except Exception:  # noqa: BLE001
+                        break
+        return r.status_code, data
+
+    acc = await POOL.pick()
+    if not acc:
+        return 503, {"error": "账号池为空"}
+    r = await upstream("POST", f"/tasks:{model}" + ("?wait=true" if wait else ""),
+                       acc["wlt_key"], body=payload, idem=uuid.uuid4().hex)
+    try:
+        data = r.json()
+    except Exception:  # noqa: BLE001
+        data = {"raw": r.text[:400]}
+    # 402 = 账单临时限流（长任务占了并发额度），退避重试
+    for attempt in range(1):
+        if r.status_code != 402:
+            break
+        wait_s = 10
+        print(f"  [demo] 402 限流，{wait_s}s 后重试 {model}", flush=True)
+        await asyncio.sleep(wait_s)
+        r = await upstream("POST", f"/tasks:{model}" + ("?wait=true" if wait else ""),
+                           acc["wlt_key"], body=payload, idem=uuid.uuid4().hex)
+        try:
+            data = r.json()
+        except Exception:  # noqa: BLE001
+            data = {"raw": r.text[:400]}
+    if wait and r.status_code < 300 and isinstance(data, dict) and data.get("id") and not data.get("done"):
+        r2, d2 = await _poll_until_done(data["id"], acc["wlt_key"], "-")
+        if d2:
+            data = d2
+            r = r2
+    POOL.bump_key("demo")
+    POOL.mark(acc["account_id"], r.status_code < 300, "" if r.status_code < 300 else str(data)[:200])
+    return r.status_code, data
+
+
+from demo_engine import DEMO as DEMO_SPEC, Demo  # noqa: E402
+DEMO = Demo(_demo_call, _demo_upload)
+
+
+@app.get("/admin/demo/spec")
+async def demo_spec():
+    return {"models": DEMO_SPEC, "seed": DEMO._load_seed()}
+
+
+@app.post("/admin/demo/{model}")
+async def admin_demo(model: str):
+    if model not in DEMO_SPEC:
+        return _err(404, f"no demo for {model}")
+    try:
+        return await DEMO.run(model)
+    except Exception as e:  # noqa: BLE001
+        cached = None
+        try:
+            cached = DEMO._fallback(model)
+        except Exception:  # noqa: BLE001
+            pass
+        return {"ok": False, "error": f"{type(e).__name__}: {e}", "cached": cached,
+                "hint": ("账号额度/权限受限，下面是此前真实跑通的结果"
+                         if cached else f"{type(e).__name__}: {e}")}
+
+
 @app.get("/v1/credits")
 async def credits(request: Request):
     """实时查询账号池真实积分（走 Clerk 会话）。"""
@@ -686,20 +799,29 @@ async def admin_state():
     dev = [{**m, "provider": "atlas-dev"} for m in MODELS]
     web = [{**m, "provider": "atlas-web"} for m in WEB_MODELS]
     pool_stats = POOL.stats()
+    ent: dict = {}
     try:
         cs = clerk()
         if cs and cs.sid:
             wc = _web_ctx
             if not wc.get("acct"):
                 wc = await web_ctx()
-            async with httpx.AsyncClient(timeout=8, proxy=PROXY) as c:
+            async with httpx.AsyncClient(timeout=15, proxy=PROXY) as c:
                 r = await c.get(f"{ATLAS}/accounts/{wc['acct']}/web-api/billing/subscription/"
                                 f"creditBalance?includeGrants=false", headers=cs.headers())
-            if r.status_code == 200:
-                pool_stats = {**pool_stats, "credits": r.json().get("totalCredits", pool_stats["credits"])}
+                if r.status_code == 200:
+                    pool_stats = {**pool_stats,
+                                  "credits": r.json().get("totalCredits", pool_stats["credits"])}
+                rc = await c.get(f"{ATLAS}/accounts/{wc['acct']}/web-api/capabilities",
+                                 headers=cs.headers())
+                if rc.status_code == 200:
+                    d = rc.json()
+                    ent = {"entitlements": d.get("entitlements") or {},
+                           "tasks": d.get("tasks") or [],
+                           "apiAllowed": (d.get("entitlements") or {}).get("developerApiUsageAllowed")}
     except Exception:  # noqa: BLE001
         pass
-    return {"pool": pool_stats, "accounts": POOL.accounts(),
+    return {"pool": pool_stats, "ent": ent, "accounts": POOL.accounts(),
             "keys": POOL.keys(), "calls": POOL.calls(50), "models": dev + web}
 
 
