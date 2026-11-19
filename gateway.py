@@ -565,6 +565,30 @@ async def operation(op_id: str, request: Request):
         return _err(502, r.text[:500], "upstream_error")
 
 
+@app.get("/v1/credits")
+async def credits(request: Request):
+    """实时查询账号池真实积分（走 Clerk 会话）。"""
+    key, _ = _auth(request)
+    if not key:
+        return _err(401, "missing key", "authentication_error")
+    try:
+        wc = await web_ctx()
+        cs = clerk()
+        assert cs is not None
+        async with httpx.AsyncClient(timeout=30, proxy=PROXY) as c:
+            r = await c.get(
+                f"{ATLAS}/accounts/{wc['acct']}/web-api/billing/subscription/creditBalance"
+                f"?includeGrants=true", headers=cs.headers())
+        if r.status_code != 200:
+            return _err(r.status_code, r.text[:200], "credits_error")
+        d = r.json()
+        return {"totalCredits": d.get("totalCredits"),
+                "grants": d.get("creditGrants", []),
+                "accounts": POOL.stats()["accounts"]}
+    except Exception as e:  # noqa: BLE001
+        return _err(503, f"{type(e).__name__}: {e}", "web_channel_error")
+
+
 @app.post("/v1/assets")
 async def upload_asset(request: Request, file: UploadFile = File(...)):
     """上传本地图片 → 返回 assetId，可直接用于 3D 重建任务。"""
@@ -661,7 +685,21 @@ async def admin_image(url: str):
 async def admin_state():
     dev = [{**m, "provider": "atlas-dev"} for m in MODELS]
     web = [{**m, "provider": "atlas-web"} for m in WEB_MODELS]
-    return {"pool": POOL.stats(), "accounts": POOL.accounts(),
+    pool_stats = POOL.stats()
+    try:
+        cs = clerk()
+        if cs and cs.sid:
+            wc = _web_ctx
+            if not wc.get("acct"):
+                wc = await web_ctx()
+            async with httpx.AsyncClient(timeout=8, proxy=PROXY) as c:
+                r = await c.get(f"{ATLAS}/accounts/{wc['acct']}/web-api/billing/subscription/"
+                                f"creditBalance?includeGrants=false", headers=cs.headers())
+            if r.status_code == 200:
+                pool_stats = {**pool_stats, "credits": r.json().get("totalCredits", pool_stats["credits"])}
+    except Exception:  # noqa: BLE001
+        pass
+    return {"pool": pool_stats, "accounts": POOL.accounts(),
             "keys": POOL.keys(), "calls": POOL.calls(50), "models": dev + web}
 
 

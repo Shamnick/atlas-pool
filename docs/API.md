@@ -397,3 +397,48 @@ POST https://clerk.worldlabs.ai/v1/client/sessions/{sid}/tokens
 
 网关已把两者统一到 `/v1/tasks/{model}`：模型清单带 `provider` 字段（`atlas-dev` / `atlas-web`），
 调用方无需关心走哪条通道。
+
+---
+
+# 站内 LLM 模型（Chisel Agent）
+
+`Chisel` 界面里有一个内置 agent，**按 token 消耗积分**（页面原文：*"Chisel has a built-in agent to assist you (LLM usage requires credits)"*）。
+它的模型选择器里有 9 个模型，前端常量（`placement-budget-*.js`）里的真实值和定价：
+
+| 显示名 | 真实 model 名 | 输入（积分/1M token） | 输出 |
+|---|---|---|---|
+| GPT-6 Luna | `gpt-6-luna` | 100 | 500 |
+| GLM 5.3 Flash | `zai/glm-5.3-flash` | 150 | 500 |
+| Gemini 3.8 Flash | `google/gemini-3.8-flash` | 750 | 3750 |
+| GLM 5.3 | `zai/glm-5.3` | 1200 | 4000 |
+| GPT-6.1 Terra | `gpt-6.1-terra` | 1000 | 5000 |
+| Claude Sonnet 5.5 | `anthropic/claude-sonnet-5.5` | 2000 | 10000 |
+| GPT-6.1 Sol | `gpt-6.1-sol` | 2000 | 10000 |
+| Gemini 4 Argon | `gemini-4-argon` | 2000 | 10000 |
+| Gemini 3.1 Pro | `gemini-3.1-pro` | 2000 | 12000 |
+| GPT-6 Astra | `gpt-6-astra` / `gpt-6-astra-fast` | — | — |
+| Claude Opus 5.5 | `claude-opus-5.5` | — | — |
+
+## 能怎么调
+
+| 通道 | 能否指定这些 model | 说明 |
+|---|---|---|
+| Developer API（`WLT-Api-Key`） | ❌ | 6 个 task 里没有 LLM，`modelParameters` 只有 seed/numSteps |
+| 站内 web-api（JWT） | ❌ | 11 个 task 的 body 加 `model` 会被 `extra_forbidden` 拒掉 |
+| **Chisel Agent（UI）** | ✅ | 唯一入口，agent 循环内部调用，产出是 3D 场景 |
+
+Agent 的协议字段在前端可见：`agentAsk` / `agentPlan` / `agentWait` / `agentPlanRender`，
+事件里带 `toolCall` / `toolResults` / `turns` / `tokens`，属于**流式 agent 会话**，不是简单的 chat completion。
+
+## 顺带拿到的两个实用接口
+
+```http
+GET  /api/v2/accounts/{acct}/web-api/billing/subscription/creditBalance?includeGrants=true
+  → {"totalCredits":9845,"creditGrants":[]}
+
+POST /api/v2/betaAgreement:accept
+  {"version":"atlas-marble2-beta-2026-10-29","accepted":true}
+  → 接受条款，否则 /workflows/* 页面永远卡在 "Accept the terms"
+```
+
+网关已封装成 `GET /v1/credits`（实时读真实余额）。
