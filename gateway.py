@@ -37,6 +37,11 @@ from typing import Any
 import httpx
 import uvicorn
 from fastapi import FastAPI, File, Request, UploadFile
+
+try:
+    from atlasreg.clerk_session import ClerkSession
+except Exception:  # noqa: BLE001
+    ClerkSession = None  # type: ignore
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 ROOT = Path(__file__).resolve().parent
@@ -86,6 +91,67 @@ MODELS = [
      "params": ["splatAsset.assetId"], "latency": "1 min"},
 ]
 MODEL_IDS = {m["id"] for m in MODELS}
+
+# ---- 站内（web-api / NOVA）任务：需要 Clerk 会话，WLT-Api-Key 调不到 ----
+WEB_MODELS = [
+    {"id": "imageUpscale", "category": "web", "object": "model", "owned_by": "worldlabs",
+     "description": "图像放大（站内能力）", "params": ["imageAsset.assetId"], "latency": "异步",
+     "surface": "NOVA"},
+    {"id": "imageEdit", "category": "web", "object": "model", "owned_by": "worldlabs",
+     "description": "图生图编辑：给图和提示词改写", "params": ["imageAsset", "prompt"],
+     "latency": "异步", "surface": "NOVA"},
+    {"id": "atlasEnhancePrompt", "category": "web", "object": "model", "owned_by": "worldlabs",
+     "description": "提示词增强（文字模型）", "params": ["images[]"], "latency": "异步", "surface": "NOVA"},
+    {"id": "chiselCaption", "category": "web", "object": "model", "owned_by": "worldlabs",
+     "description": "场景自动描述 / 打标", "params": ["entities", "views", "objectIdLegend", "projection"],
+     "latency": "异步", "surface": "NOVA"},
+    {"id": "chiselCaptionUpdate", "category": "web", "object": "model", "owned_by": "worldlabs",
+     "description": "更新场景描述", "params": ["entities", "views"], "latency": "异步", "surface": "NOVA"},
+]
+WEB_IDS = {m["id"] for m in WEB_MODELS}
+
+_cs: "ClerkSession | None" = None
+_web_ctx: dict[str, Any] = {"acct": "", "proj": "", "wsess": "", "at": 0.0}
+
+
+def clerk() -> "ClerkSession | None":
+    global _cs
+    if _cs is None and ClerkSession is not None:
+        _cs = ClerkSession(ROOT / "clerk_session.json")
+        try:
+            _cs.ensure(str(ROOT / "ms_profile"))
+        except Exception:  # noqa: BLE001
+            pass
+    return _cs
+
+
+async def web_ctx() -> dict[str, str]:
+    """确保有 JWT、account/project、以及一个 web session。"""
+    cs = clerk()
+    if cs is None or not cs.sid:
+        raise RuntimeError("没有 Clerk 会话：先跑 `python -m atlasreg.clerk_session` 或导出 clerk_session.json")
+    if time.time() - _web_ctx["at"] < 600 and _web_ctx["wsess"]:
+        return _web_ctx
+    async with httpx.AsyncClient(timeout=40) as c:
+        h = cs.headers()
+        r = await c.get(f"{ATLAS}/accounts", headers=h)
+        if r.status_code != 200:
+            raise RuntimeError(f"accounts {r.status_code}: {r.text[:200]}")
+        a = r.json()["accounts"][0]
+        acct = a["name"].split("/")[-1]
+        proj = a["defaultProject"].split("/")[-1]
+        r = await c.get(f"{ATLAS}/accounts/{acct}/projects/{proj}/web-api/sessions", headers=cs.headers())
+        ws = (r.json().get("sessions") or []) if r.status_code == 200 else []
+        if ws:
+            wsess = (ws[0].get("name") or "").split("/")[-1]
+        else:
+            r = await c.post(f"{ATLAS}/accounts/{acct}/projects/{proj}/web-api/sessions",
+                             json={}, headers=cs.headers())
+            if r.status_code >= 300:
+                raise RuntimeError(f"create session {r.status_code}: {r.text[:200]}")
+            wsess = (r.json().get("name") or "").split("/")[-1]
+    _web_ctx.update({"acct": acct, "proj": proj, "wsess": wsess, "at": time.time()})
+    return _web_ctx
 
 
 # ---------------------------------------------------------------- 存储
@@ -346,9 +412,14 @@ async def models(request: Request):
     key, _ = _auth(request)
     if not key:
         return _err(401, "missing key: Authorization: Bearer sk-pool-…", "authentication_error")
-    return {"object": "list",
-            "data": [{k: m[k] for k in ("id", "object", "owned_by", "category", "description",
-                                        "params", "latency")} for m in MODELS]}
+    data = [{"id": m["id"], "object": "model", "owned_by": m["owned_by"],
+             "provider": "atlas-dev", "category": m["category"], "description": m["description"],
+             "params": m["params"], "latency": m["latency"]} for m in MODELS]
+    data += [{"id": m["id"], "object": "model", "owned_by": m["owned_by"],
+              "provider": "atlas-web", "category": "web", "description": m["description"],
+              "params": m["params"], "latency": m["latency"]} for m in WEB_MODELS]
+    return {"object": "list", "data": data,
+            "providers": {"atlas-dev": len(MODELS), "atlas-web": len(WEB_MODELS)}}
 
 
 @app.get("/v1/usage")
@@ -380,7 +451,7 @@ async def submit(model: str, request: Request):
     key, sk = _auth(request)
     if not key:
         return _err(401, "missing key", "authentication_error")
-    if model not in MODEL_IDS:
+    if model not in MODEL_IDS and model not in WEB_IDS:
         return _err(404, f"unknown model '{model}' — see /v1/models", "model_not_found")
     if not POOL.rate_ok(sk, key.get("rpm") or KEY_RATE_LIMIT):
         return _err(429, "rate limit: 60 req/min per key", "rate_limit_exceeded")
@@ -394,6 +465,47 @@ async def submit(model: str, request: Request):
         json.loads(body or b"{}")
     except Exception:  # noqa: BLE001
         return _err(400, "body must be JSON")
+
+    q = str(request.url).lower()
+    wait = "wait=true" in q or "wait=full" in q
+    wait_full = "wait=false" not in q
+
+    # ---- 站内任务（web-api / NOVA）：用 Clerk JWT，不用 WLT key ----
+    if model in WEB_IDS:
+        req_id_w = getattr(request.state, "req_id", "-")
+        t0w = time.time()
+        try:
+            wc = await web_ctx()
+            cs = clerk()
+            assert cs is not None
+            h = cs.headers()
+            url = (f"{ATLAS}/accounts/{wc['acct']}/projects/{wc['proj']}"
+                   f"/web-api/sessions/{wc['wsess']}/tasks:{model}")
+            async with httpx.AsyncClient(timeout=600, proxy=PROXY) as c2:
+                r = await c2.post(url, content=body, headers=h)
+            data = r.json() if r.status_code < 300 else {"detail": r.text[:400]}
+            if r.status_code < 300 and isinstance(data, dict) and data.get("id") and wait_full:
+                # 站内 operation 用 JWT 轮询
+                deadline = time.time() + LONG_TASK_TIMEOUT
+                op_id = data["id"]
+                while not data.get("done") and time.time() < deadline:
+                    await asyncio.sleep(4)
+                    try:
+                        rr = await c2.get(f"{ATLAS}/operations/{op_id}?wait=true", headers=cs.headers())
+                        if rr.status_code < 400:
+                            data = rr.json()
+                    except Exception:  # noqa: BLE001
+                        break
+            POOL.bump_key(sk)
+            POOL.log_call(sk, model, "atlas-web", r.status_code, time.time() - t0w,
+                          str(data.get("id") or ""), "" if r.status_code < 300 else str(data)[:200],
+                          req_id_w)
+            if isinstance(data, dict):
+                data["_gateway"] = {"model": model, "provider": "atlas-web",
+                                    "elapsed": round(time.time() - t0w, 2), "request_id": req_id_w}
+            return JSONResponse(data if r.status_code >= 300 else data, status_code=r.status_code)
+        except Exception as e:  # noqa: BLE001
+            return _err(503, f"站内通道失败: {type(e).__name__}: {e}", "web_channel_error")
 
     q = str(request.url).lower()
     wait = "wait=true" in q or "wait=full" in q
@@ -547,8 +659,10 @@ async def admin_image(url: str):
 # ---------------------------------------------------------------- 管理端
 @app.get("/admin/state")
 async def admin_state():
+    dev = [{**m, "provider": "atlas-dev"} for m in MODELS]
+    web = [{**m, "provider": "atlas-web"} for m in WEB_MODELS]
     return {"pool": POOL.stats(), "accounts": POOL.accounts(),
-            "keys": POOL.keys(), "calls": POOL.calls(50), "models": MODELS}
+            "keys": POOL.keys(), "calls": POOL.calls(50), "models": dev + web}
 
 
 @app.post("/admin/accounts")

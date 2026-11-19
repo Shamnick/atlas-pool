@@ -96,7 +96,19 @@ print([m.id for m in client.models.list().data])
 | `posedImages2Splats` | 多视图（≥2）→ 3D Gaussian Splats（`.spz`） | `posedFrames[]` | ≈2.7 min |
 | `splats2Mesh` | Splats → 三角网格（mesh + anchor） | `splatAsset.assetId` | ≈1 min |
 
-完整字段、链路示例、错误码见 **[docs/API.md](docs/API.md)**。
+### 站内能力（需登录态）
+
+`capabilities` 显示账号还有 5 个只能在站内用的任务，网关也会一并暴露（`provider: atlas-web`）：
+
+| model | 能力 | 关键参数 |
+|---|---|---|
+| `imageUpscale` | 图像放大 | `imageAsset.assetId` |
+| `imageEdit` | 图生图编辑 | `imageAsset` + `prompt` |
+| `atlasEnhancePrompt` | 提示词增强（文字） | `images[]` |
+| `chiselCaption` | 场景自动描述 | `entities` `views` `objectIdLegend` `projection` |
+| `chiselCaptionUpdate` | 更新描述 | `entities` `views` |
+
+这两条通道共 **11 个模型**，调用方式统一。完整字段、链路示例、错误码见 **[docs/API.md](docs/API.md)**。
 
 > 长任务（`posedImages2Splats` / `splats2Mesh`）即使带 `?wait=true` 也会先返回 `RUNNING`，
 > 网关会自动轮询 `operations/{id}` 直到 `done`，调用方无感。

@@ -173,6 +173,48 @@ class Owa:
                 except Exception:  # noqa: BLE001
                     pass
 
+    # ---------------------------------------------------------------- 复用已有 page 读码
+    def wait_code_on_page(self, page, address: str, timeout: int = 180, poll: float = 5.0,
+                          snapshot: bool = True, log=print) -> str:
+        """在调用方自己的 Playwright 页面/上下文里读码（避免再开一个浏览器进程）。"""
+        addr = address.lower()
+        base = addr.split("@")[0].split("+")[0]
+        seen: set[str] = set()
+        deadline = time.time() + timeout
+
+        try:
+            if "outlook.live.com" not in page.url:
+                for _ in range(3):
+                    try:
+                        page.goto("https://outlook.live.com/mail/0/", wait_until="commit", timeout=45000)
+                        break
+                    except Exception:  # noqa: BLE001
+                        time.sleep(2)
+            time.sleep(4)
+            if snapshot:
+                for _, old in self._codes_from_dom(page):
+                    seen.add(old)
+            while time.time() < deadline:
+                for row_text, code in self._codes_from_dom(page):
+                    if code not in seen:
+                        seen.add(code)
+                        return code
+                code = self._open_and_read(page, 0)
+                if code and code not in seen:
+                    return code
+                try:
+                    btn = page.query_selector('[data-automationid="RefreshButton"]')
+                    if btn:
+                        btn.click()
+                    else:
+                        page.reload()
+                except Exception:  # noqa: BLE001
+                    pass
+                time.sleep(poll)
+        except Exception as e:  # noqa: BLE001
+            log(f"读码异常: {str(e)[:120]}")
+        raise RuntimeError(f"读码超时（{address}）")
+
     # ---------------------------------------------------------------- 读码
     def wait_code(self, address: str, since_ts: float | None = None,
                   timeout: int = 180, poll: float = 4.0, snapshot: bool = True,

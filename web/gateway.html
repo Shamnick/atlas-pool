@@ -315,12 +315,13 @@ async function load(){
   $('sAvg').textContent = (d.pool.avg_elapsed||0).toFixed(1)+'s';
 
   if (!$('model').options.length){
-    const g={}; MODELS.forEach(m=>(g[m.category||'other'] ||= []).push(m));
-    $('model').innerHTML = Object.entries(g).map(([c,list])=>{
-      const label = c==='3d' ? '3D / 重建' : '图像';
-      return `<optgroup label="${label}">` + list.map(m=>
-        `<option value="${m.id}">${m.id} — ${m.description}</option>`).join('') + '</optgroup>';
-    }).join('');
+    const g={};
+    MODELS.forEach(m=>{ const k=(m.provider||'atlas-dev')+'|'+(m.category||'image'); (g[k] ||= []).push(m); });
+    const LABEL={ 'atlas-dev|image':'Atlas · 图像（Developer API）', 'atlas-dev|3d':'Atlas · 3D 重建（Developer API）',
+                  'atlas-web|web':'Atlas 站内能力（需登录态）' };
+    $('model').innerHTML = Object.entries(g).map(([k,list])=>
+      `<optgroup label="${LABEL[k]||k} (${list.length})">`+list.map(m=>
+        `<option value="${m.id}">${m.id} — ${m.description}</option>`).join('')+'</optgroup>').join('');
     $('model').onchange = hint;
     hint();
   }
@@ -367,7 +368,7 @@ async function load(){
 
 function hint(){
   const m = MODELS.find(x=>x.id===$('model').value);
-  if (m) $('modelHint').textContent = (m.params||[]).join(' · ');
+  if (m) $('modelHint').textContent = `${m.provider||'atlas-dev'} · ${(m.params||[]).join(' · ')}`;
 }
 
 async function runTask(){

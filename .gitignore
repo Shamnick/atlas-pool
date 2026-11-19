@@ -34,3 +34,4 @@ Thumbs.db
 # --- 测试产物 ---
 /tmp/
 *.tmp
+clerk_session.json

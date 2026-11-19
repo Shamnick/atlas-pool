@@ -346,3 +346,54 @@ curl -X POST http://127.0.0.1:8790/v1/assets \
 任务 body 里加 `webhookUrl`（https、443、不可与 `?wait=true` 同用），
 Atlas 会在完成时 POST 一个签名的 `task.succeeded` / `task.failed`，失败重试 24h，
 签名用 `/.well-known/webhooks/jwks.json` 公钥验证。
+
+---
+
+# 站内能力（web-api / NOVA 通道）
+
+`GET /api/v2/accounts/{acct}/web-api/capabilities` 返回该账号**站内**可用的全部任务
+（需要 Clerk 会话，`WLT-Api-Key` 调用会 401）：
+
+```json
+{"tasks":["atlasChisel","atlasEnhancePrompt","atlasGenerate","atlasTextToImage",
+          "chiselCaption","chiselCaptionUpdate","imageEdit","imageUpscale",
+          "images2PosedRGBD","posedImages2Splats","splats2Mesh"]}
+```
+
+比对外开放的 Developer API（6 个）多 5 个。
+
+## 调用方式
+
+```python
+# 1) 创建/复用一个 web session
+POST /api/v2/accounts/{acct}/projects/{proj}/web-api/sessions      → wsess_xxx
+# 2) 发任务
+POST /api/v2/accounts/{acct}/projects/{proj}/web-api/sessions/{wsess}/tasks:{task}
+# 3) 轮询
+GET  /api/v2/operations/{id}?wait=true
+```
+
+鉴权用 Clerk JWT（60s 过期），但可以纯 HTTP 刷新，无需常开浏览器：
+
+```python
+POST https://clerk.worldlabs.ai/v1/client/sessions/{sid}/tokens
+     Cookie: __client, __session, ...
+  → {"jwt": "eyJ..."}
+```
+
+`atlasreg/clerk_session.py` 已封装：从浏览器 profile 导出 cookie 一次 → 之后自动续期。
+
+## 五个站内任务（实测端点可用）
+
+| task | 必需参数 | 说明 |
+|---|---|---|
+| `imageUpscale` | `imageAsset.assetId` | 图像放大（201，约 8s） |
+| `imageEdit` | `imageAsset` + `prompt` | 图生图编辑（201） |
+| `atlasEnhancePrompt` | `images[]`（对象数组，不是 id 字符串） | 提示词增强（文字模型） |
+| `chiselCaption` | `entities` `views` `objectIdLegend` `projection` | 场景自动描述 |
+| `chiselCaptionUpdate` | `entities` `views` | 更新描述 |
+
+返回的 `metadata.surface` 是 `NOVA`，与 Developer API 的 `DEVELOPER_API` 区分。
+
+网关已把两者统一到 `/v1/tasks/{model}`：模型清单带 `provider` 字段（`atlas-dev` / `atlas-web`），
+调用方无需关心走哪条通道。
