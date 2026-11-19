@@ -36,7 +36,7 @@ from typing import Any
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, File, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 ROOT = Path(__file__).resolve().parent
@@ -44,6 +44,20 @@ DB = ROOT / "pool.db"
 ATLAS = "https://atlas.worldlabs.ai/api/v2"
 
 PROXY: str | None = None
+
+
+def detect_proxy(pref: str | None = "auto") -> str | None:
+    """auto：探测本机常见代理端口；都没开就直连。"""
+    if pref and pref.lower() not in ("auto", ""):
+        return pref
+    import socket
+    for port in (7890, 7897, 1087, 1080, 6152, 8888):
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=0.25):
+                return f"http://127.0.0.1:{port}"
+        except OSError:
+            continue
+    return None
 UPSTREAM_CONCURRENCY = 64          # 同时打到上游的最大请求数
 KEY_RATE_LIMIT = 60                # 单 key 每分钟
 LONG_TASK_TIMEOUT = 900            # 长任务轮询上限（秒）
@@ -439,6 +453,86 @@ async def operation(op_id: str, request: Request):
         return _err(502, r.text[:500], "upstream_error")
 
 
+@app.post("/v1/assets")
+async def upload_asset(request: Request, file: UploadFile = File(...)):
+    """上传本地图片 → 返回 assetId，可直接用于 3D 重建任务。"""
+    key, sk = _auth(request)
+    if not key:
+        return _err(401, "missing key", "authentication_error")
+    acc = await POOL.pick()
+    if not acc:
+        return _err(503, "账号池为空", "pool_empty")
+    data = await file.read()
+    if not data:
+        return _err(400, "empty file")
+    mime = file.content_type or "image/jpeg"
+    size = str(len(data))
+    try:
+        r = await upstream("POST", "/assets", acc["wlt_key"], body=json.dumps(
+            {"asset": {"displayName": file.filename or "upload", "type": "image",
+                       "parts": [{"role": "rgb", "contentType": mime, "contentLength": size}]}}
+        ).encode(), idem=uuid.uuid4().hex)
+        if r.status_code >= 300:
+            return _err(r.status_code, r.text[:300], "asset_create_failed")
+        asset_id = r.json()["id"]
+
+        r = await upstream("POST", f"/assets/{asset_id}:createUploadUrls", acc["wlt_key"],
+                           body=json.dumps({"parts": [{"role": "rgb", "contentType": mime,
+                                                      "contentLength": size}]}).encode())
+        if r.status_code >= 300:
+            return _err(r.status_code, r.text[:300], "upload_url_failed")
+        up = r.json()["uploads"][0]
+
+        # 上传到 GCS（headers 由 Atlas 精确给出，不可改动）
+        async with httpx.AsyncClient(timeout=300) as raw:
+            pr = await raw.put(up["url"], content=data, headers=up["headers"])
+        if pr.status_code >= 300:
+            return _err(pr.status_code, pr.text[:300], "upload_failed")
+
+        r = await upstream("POST", f"/assets/{asset_id}:completeUpload", acc["wlt_key"], body=b"{}")
+        if r.status_code >= 300:
+            return _err(r.status_code, r.text[:300], "complete_failed")
+        info = r.json()
+        POOL.bump_key(sk)
+        POOL.mark(acc["account_id"], True)
+        return {"assetId": info["id"], "state": info.get("state"),
+                "width": info.get("width"), "height": info.get("height"),
+                "mimeType": info.get("mimeType"), "sizeBytes": info.get("sizeBytes")}
+    except Exception as e:  # noqa: BLE001
+        POOL.mark(acc["account_id"], False, str(e)[:200])
+        return _err(502, f"上传失败: {type(e).__name__}: {e}", "upstream_error")
+
+
+@app.post("/v1/operations/{op_id}/cancel")
+async def cancel_operation(op_id: str, request: Request):
+    key, _ = _auth(request)
+    if not key:
+        return _err(401, "missing key", "authentication_error")
+    acc = await POOL.pick()
+    if not acc:
+        return _err(503, "账号池为空", "pool_empty")
+    r = await upstream("POST", f"/operations/{op_id}:cancel", acc["wlt_key"], body=b"{}")
+    try:
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception:  # noqa: BLE001
+        return _err(502, r.text[:300], "upstream_error")
+
+
+@app.get("/v1/operations/{op_id}/trace")
+async def trace_operation(op_id: str, request: Request):
+    key, _ = _auth(request)
+    if not key:
+        return _err(401, "missing key", "authentication_error")
+    acc = await POOL.pick()
+    if not acc:
+        return _err(503, "账号池为空", "pool_empty")
+    r = await upstream("GET", f"/operations/{op_id}:trace", acc["wlt_key"])
+    try:
+        return JSONResponse(r.json(), status_code=r.status_code)
+    except Exception:  # noqa: BLE001
+        return _err(502, r.text[:300], "upstream_error")
+
+
 @app.get("/admin/image")
 async def admin_image(url: str):
     if not url.startswith("https://storage.googleapis.com/"):
@@ -536,11 +630,12 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--port", type=int, default=8790)
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--proxy", default="http://127.0.0.1:7890")
+    ap.add_argument("--proxy", default="auto", help="auto | http://127.0.0.1:7890 | none")
     ap.add_argument("--concurrency", type=int, default=64)
     ap.add_argument("--seed-account", default="", help="email::wlt_key::credits")
     a = ap.parse_args()
-    PROXY = a.proxy or None
+    PROXY = None if (a.proxy or "").lower() == "none" else detect_proxy(a.proxy)
+    print(f"  出口     → {'代理 ' + PROXY if PROXY else '直连'}", flush=True)
     UPSTREAM_CONCURRENCY = a.concurrency
 
     if a.seed_account and "::" in a.seed_account:

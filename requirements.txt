@@ -3,3 +3,4 @@ pyyaml>=6.0
 playwright>=1.48
 fastapi
 uvicorn
+python-multipart

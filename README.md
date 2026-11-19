@@ -111,6 +111,10 @@ print([m.id for m in client.models.list().data])
 | `POST` | `/v1/tasks/{model}?wait=true` | 提交任务，body 原样透传上游 |
 | `GET` | `/v1/operations/{id}?wait=true` | 轮询操作 |
 | `GET` | `/v1/usage` | 当前 key 的调用统计 |
+| `POST` | `/v1/assets` | 上传图片（multipart）→ `assetId`，用于 3D 重建 |
+| `POST` | `/v1/operations/{id}/cancel` | 取消任务 |
+| `GET` | `/v1/operations/{id}/trace` | 执行链路追踪 |
+| `GET` | `/v1/health` | 探活（可直接挂负载均衡） |
 
 鉴权两种写法都接受：
 

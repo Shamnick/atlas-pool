@@ -275,3 +275,74 @@ print(sub["response"]["mesh"]["url"])
 | `done:false / RUNNING` | 长任务 | 轮询 operations |
 | 429 | 触发限流 | 退避重试 |
 | 404 `accounts/accounts/…` | account 名带前缀 | 去掉 `accounts/` |
+
+---
+
+# 资产上传（用自己的照片做 3D）
+
+三步 + 一个坑，实测跑通（PNG 488KB → `READY`，2720×1536）。
+
+## 流程
+
+```python
+H = {"WLT-Api-Key": WLT, "Content-Type": "application/json"}
+size = str(len(data)); mime = "image/png"
+
+# 1) 建资产（type=image 必须带 rgb part）
+a = httpx.post(f"{B}/assets", headers=H, json={"asset": {
+        "displayName": "my.png", "type": "image",
+        "parts": [{"role": "rgb", "contentType": mime, "contentLength": size}]}}).json()
+aid = a["id"]                       # state = UPLOADING
+
+# 2) 按 part 申请上传地址（注意是复数 createUploadUrls）
+u = httpx.post(f"{B}/assets/{aid}:createUploadUrls", headers=H, json={
+        "parts": [{"role": "rgb", "contentType": mime, "contentLength": size}]}).json()["uploads"][0]
+
+# 3) PUT 上传 —— headers 必须原样用接口返回的
+httpx.put(u["url"], content=data, headers=u["headers"])
+
+# 4) 收尾
+info = httpx.post(f"{B}/assets/{aid}:completeUpload", headers=H, json={}).json()
+# → {"state":"READY","width":2720,"height":1536,"sizeBytes":"6939001", ...}
+```
+
+## 踩过的坑
+
+| 现象 | 原因 | 解法 |
+|---|---|---|
+| `422 Field required: asset` | body 要包一层 `{"asset": {...}}` | 加上 |
+| `400 asset type 'image' requires at least one of rgb, depth` | 漏了 part | `parts:[{"role":"rgb",...}]` |
+| `422 Field required: contentType/contentLength` | part 必填 | 补 `contentType` + `contentLength`（字符串）|
+| `400 has a type, so its bytes are granted per part by :createUploadUrls` | 用错了单数接口 | 用 **`:createUploadUrls`** |
+| GCS `MalformedSecurityHeader` | 少发签名头 | 必须发 `x-goog-if-generation-match` 等**全部** headers |
+| GCS `SignatureDoesNotMatch` | `x-goog-content-length-range` 写成 `0,L` | 正确格式是 **`L,L`**（min,max 都等于长度） |
+
+**结论：上传的 headers 不要自己拼，直接用 `uploads[i]["headers"]`。**
+
+## 网关封装
+
+```bash
+curl -X POST http://127.0.0.1:8790/v1/assets \
+  -H "Authorization: Bearer sk-pool-xxxx" \
+  -F "file=@photo.png;type=image/png"
+# → {"assetId":"asset_...","state":"READY","width":2480,"height":2500,"sizeBytes":"488519"}
+```
+
+拿到的 `assetId` 直接喂给 `images2PosedRGBD`：
+
+```json
+{"frames":[{"imageAsset":{"assetId":"asset_..."}}], "targetResolution":[1280,720]}
+```
+
+## 操作控制
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/v1/operations/{id}/cancel` | 取消正在跑的任务 |
+| `GET` | `/v1/operations/{id}/trace` | 查看执行链路 |
+
+## Webhook（免轮询）
+
+任务 body 里加 `webhookUrl`（https、443、不可与 `?wait=true` 同用），
+Atlas 会在完成时 POST 一个签名的 `task.succeeded` / `task.failed`，失败重试 24h，
+签名用 `/.well-known/webhooks/jwks.json` 公钥验证。
