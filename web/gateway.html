@@ -88,6 +88,9 @@ select:focus,input:focus{border-color:rgba(109,140,255,.55);box-shadow:0 0 0 3px
 /* ---------- run ---------- */
 .run{display:grid;grid-template-columns:minmax(180px,240px) 1fr auto;gap:10px;align-items:center}
 .hint{font-size:11.5px;color:var(--fg-3);margin-top:9px}
+.uploadbtn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:var(--r-sm);
+  padding:7px 13px;font-size:12.5px;background:var(--surface-2);cursor:pointer;transition:.15s}
+.uploadbtn:hover{border-color:var(--line-2);background:#1a1c21}
 .out{margin-top:16px;display:none}
 .out.show{display:block}
 .shots{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;margin-bottom:12px}
@@ -202,6 +205,12 @@ tr.hover:hover td{background:rgba(255,255,255,.012)}
         <select id="model"></select>
         <input id="prompt" value="a small greenhouse at dawn, warm light, wide view"/>
         <button class="primary" id="runBtn" onclick="runTask()">运行</button>
+      </div>
+      <div style="margin-top:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <label class="uploadbtn">上传自己的图
+          <input type="file" id="fileInput" accept="image/*" onchange="uploadAsset()" hidden/>
+        </label>
+        <span class="muted" id="assetInfo" style="font-size:11.5px">支持 png / jpg，返回 assetId 可用于 3D 重建</span>
       </div>
       <div class="out" id="out">
         <div class="shots" id="shots"></div>
@@ -400,6 +409,23 @@ async function runTask(){
   }catch(e){
     $('out').classList.add('show'); $('raw').textContent='请求失败：'+e;
   }finally{ btn.disabled=false; btn.textContent='运行'; load(); }
+}
+
+async function uploadAsset(){
+  const f=$('fileInput').files[0]; if(!f) return;
+  if(!SK) return toast('先到「账号」页签发密钥');
+  const fd=new FormData(); fd.append('file', f);
+  $('assetInfo').textContent='上传中…';
+  try{
+    const r=await fetch('/v1/assets',{method:'POST',headers:{'Authorization':'Bearer '+SK},body:fd});
+    const d=await r.json();
+    if(d.assetId){
+      $('assetInfo').innerHTML=`<span class="mono" style="color:#9db0ff">${d.assetId}</span>
+        <span class="muted"> · ${d.width}×${d.height} · ${d.state}</span>`;
+      toast('上传完成');
+    } else { $('assetInfo').textContent = (d.error&&d.error.message)||'上传失败'; }
+  }catch(e){ $('assetInfo').textContent='上传失败：'+e; }
+  $('fileInput').value='';
 }
 
 async function newKey(){
